@@ -1,1 +1,3 @@
 # docker-computer
+
+docker-computer is a lean, generic container image that provides a browser-accessible GTK desktop: one Broadway display for native GTK 3 applications, a built-in dock, and headless Chromium for CDP-based browsing. A small Go agent (`dc-agent`) exposes a versioned HTTP API for apps, input, screenshots, files, and recording. The image is MIT-licensed, runs as uid 1000 with a writable volume at `/home/bot`, and is designed for agentic and human use without coupling to any particular consumer.
