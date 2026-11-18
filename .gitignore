@@ -1,0 +1,4 @@
+/docker-computer:dev
+*.png
+*.jpg
+/tmp/
