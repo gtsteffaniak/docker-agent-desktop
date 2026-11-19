@@ -18,6 +18,9 @@ type Surface struct {
 	Visible bool
 	// Pixels holds the latest RGBA framebuffer for this surface.
 	Pixels []byte
+	// PixelsW and PixelsH are the dimensions of Pixels. They lag Width and Height after a resize
+	// until the app sends a buffer at the new size, so decoding must use these, not Width/Height.
+	PixelsW, PixelsH int
 }
 
 type commandReader struct {
@@ -79,15 +82,28 @@ func (r *commandReader) getBytes(n int) ([]byte, error) {
 	return out, nil
 }
 
+// OpTracer receives one call per surface operation while a message is applied. It is used for
+// debug logging and may be nil. w and h are set only for operations that carry a size.
+type OpTracer func(op byte, serial uint32, id uint16, w, h int)
+
 // ApplyServerMessage parses one binary WebSocket message from broadwayd into surface updates.
 func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
+	return ApplyServerMessageTraced(data, surfaces, nil)
+}
+
+// ApplyServerMessageTraced is ApplyServerMessage with an optional per-operation tracer.
+func ApplyServerMessageTraced(data []byte, surfaces map[uint16]*Surface, trace OpTracer) error {
+	if trace == nil {
+		trace = func(byte, uint32, uint16, int, int) {}
+	}
 	r := newCommandReader(data)
 	for r.remaining() > 0 {
 		op, err := r.getU8()
 		if err != nil {
 			return err
 		}
-		if _, err := r.getU32(); err != nil { // serial
+		serial, err := r.getU32()
+		if err != nil {
 			return err
 		}
 		switch op {
@@ -103,12 +119,14 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			w, _ := r.getU16()
 			h, _ := r.getU16()
 			_, _ = r.getBool()
+			trace(op, serial, id, int(w), int(h))
 			surfaces[id] = &Surface{ID: id, X: int(x), Y: int(y), Width: int(w), Height: int(h)}
 		case 'S':
 			id, err := r.getU16()
 			if err != nil {
 				return err
 			}
+			trace(op, serial, id, 0, 0)
 			if s := surfaces[id]; s != nil {
 				s.Visible = true
 			}
@@ -117,6 +135,7 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			if err != nil {
 				return err
 			}
+			trace(op, serial, id, 0, 0)
 			if s := surfaces[id]; s != nil {
 				s.Visible = false
 			}
@@ -125,6 +144,7 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			if err != nil {
 				return err
 			}
+			trace(op, serial, id, 0, 0)
 			delete(surfaces, id)
 		case 'm':
 			id, err := r.getU16()
@@ -150,8 +170,9 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 				h, _ := r.getU16()
 				s.Width, s.Height = int(w), int(h)
 			}
+			trace(op, serial, id, s.Width, s.Height)
 		case 'r', 'R', 'p', 'g', 'u', 'k':
-			// Skip ops we do not need for framebuffer decode in Phase 0.
+			// Skip ops we do not need for framebuffer decode.
 			switch op {
 			case 'r', 'R', 'p':
 				if _, err := r.getU16(); err != nil {
@@ -195,6 +216,7 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			if err != nil {
 				return err
 			}
+			trace(op, serial, id, int(w), int(h))
 			s := surfaces[id]
 			if s == nil {
 				s = &Surface{ID: id, Width: int(w), Height: int(h), Visible: true}
@@ -204,14 +226,13 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			if err != nil {
 				return fmt.Errorf("inflate surface %d: %w", id, err)
 			}
-			old := s.Pixels
-			oldW, oldH := s.Width, s.Height
-			s.Width, s.Height = int(w), int(h)
-			pix, err := decodeBuffer(old, oldW, oldH, int(w), int(h), inflated)
+			// Diff against the previous buffer using that buffer's own dimensions.
+			pix, err := decodeBuffer(s.Pixels, s.PixelsW, s.PixelsH, int(w), int(h), inflated)
 			if err != nil {
 				return err
 			}
-			s.Pixels = pix
+			s.Width, s.Height = int(w), int(h)
+			s.Pixels, s.PixelsW, s.PixelsH = pix, int(w), int(h)
 			s.Visible = true
 		case 'i':
 			id, err := r.getU16()
@@ -239,6 +260,7 @@ func ApplyServerMessage(data []byte, surfaces map[uint16]*Surface) error {
 			s.Width, s.Height = int(w), int(h)
 			s.Pixels = make([]byte, len(rgb))
 			copy(s.Pixels, rgb)
+			s.PixelsW, s.PixelsH = int(w), int(h)
 			s.Visible = true
 		default:
 			return fmt.Errorf("unknown broadway op %q at %d", op, r.pos-1)

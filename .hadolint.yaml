@@ -1,0 +1,4 @@
+# Debian package versions are not pinned: trixie moves on, and the image is rebuilt from the
+# trixie-slim tag. Security fixes come in with a rebuild.
+ignored:
+  - DL3008
