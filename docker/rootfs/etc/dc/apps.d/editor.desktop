@@ -1,0 +1,7 @@
+[app]
+id = editor
+name = Text Editor
+exec = mousepad
+icon = org.xfce.mousepad
+order = 20
+port = 8083

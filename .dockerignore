@@ -1,0 +1,12 @@
+.git
+.github
+.build
+.gitignore
+.dockerignore
+*.md
+docs
+scripts
+tests
+**/*_test.go
+*.png
+*.jpg

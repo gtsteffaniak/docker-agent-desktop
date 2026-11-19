@@ -1,4 +1,5 @@
 /docker-computer:dev
 *.png
 *.jpg
-/tmp/
+/tmp/.build/
+.build/

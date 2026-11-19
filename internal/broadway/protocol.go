@@ -1,5 +1,5 @@
 // Package broadway implements the GTK 3 Broadway WebSocket client protocol
-// for input injection and framebuffer decoding (Phase 0 spike).
+// for input injection and framebuffer decoding .
 package broadway
 
 // EventType values match gdk/broadway/broadway-protocol.h (client → server).
@@ -13,8 +13,11 @@ const (
 	EventKeyPress      = 'k'
 	EventKeyRelease    = 'K'
 	EventScreenSize    = 'd'
-	EventGrabNotify    = 'g'
-	EventUngrabNotify  = 'u'
+	// EventConfigureNotify confirms a surface's position and size back to GDK, as the browser does
+	// after every move or resize. Without it an app never redraws at its new size.
+	EventConfigureNotify = 'w'
+	EventGrabNotify      = 'g'
+	EventUngrabNotify    = 'u'
 )
 
 // GDK modifier masks used in Broadway pointer/key state.

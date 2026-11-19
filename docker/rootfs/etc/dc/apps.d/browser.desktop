@@ -1,0 +1,8 @@
+# Browser window: headless Chromium streamed over CDP. The web desktop draws its toolbar and
+# frame. It has no GTK display and no Broadway port, so exec is informational only.
+[app]
+id = browser
+name = Browser
+exec = chromium --headless=new
+icon = chromium
+order = 5

@@ -1,0 +1,7 @@
+[app]
+id = files
+name = Files
+exec = thunar
+icon = org.xfce.thunar
+order = 30
+port = 8082

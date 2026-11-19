@@ -1,0 +1,8 @@
+# dive CI rules for docker-computer. dive --ci fails the gate when any rule is broken.
+# Calibrated on the runtime image (efficiency ~99.6%, wasted ~4.5 MB). The thresholds sit just
+# above that baseline, so a step that re-creates a large tree (for example a chown -R of /usr or a
+# COPY of a build directory into the runtime stage) fails the gate.
+rules:
+  highestWastedBytes: 20MB
+  highestUserWastedPercent: 0.05
+  lowestEfficiency: 0.97
