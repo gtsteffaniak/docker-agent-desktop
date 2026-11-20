@@ -102,18 +102,27 @@ func (a *Agent) handleBrowserWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // pumpFrames sends each new screencast frame. A slow client gets the newest frame, not a queue.
+// It holds a viewer subscription on the current screencast, so Chromium only encodes frames while
+// at least one window is open, and moves the subscription when Chromium restarts.
 func (a *Agent) pumpFrames(ctx context.Context, s *wsSocket) {
 	var cur *cdp.Screencast
 	var sent uint64
+	release := func() {}
+	defer func() { release() }()
 	for ctx.Err() == nil {
 		sc := a.screencast()
 		if sc == nil {
-			cur = nil
+			if cur != nil {
+				release()
+				release, cur = func() {}, nil
+			}
 			pause(ctx, 250*time.Millisecond)
 			continue
 		}
 		if sc != cur {
-			cur, sent = sc, 0
+			release()
+			cur = sc
+			sent, release = sc.Subscribe()
 		}
 		frame, seq, err := sc.WaitNewer(ctx, sent)
 		if err != nil {
