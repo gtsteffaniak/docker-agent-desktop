@@ -20,9 +20,15 @@ func (a *Agent) sessionHealth(ctx context.Context) map[string]any {
 	checks := map[string]any{"agent": "ok"}
 	status := "ok"
 
-	// Chromium: disabled is a configuration, not a failure.
+	// Chromium: disabled is a configuration, not a failure, and so is a browser
+	// that is not running because nobody has needed it yet (lazy start), it was
+	// stopped, or it was shut down idle: the next browser call starts it. Only a
+	// browser that should be running (its supervisor is up) but has no working
+	// CDP connection is down.
 	if browserMode() == "off" {
 		checks["chromium"] = "disabled"
+	} else if !a.browserSupervised() {
+		checks["chromium"] = "stopped"
 	} else if sc := a.screencast(); sc == nil {
 		checks["chromium"] = "down"
 		status = "degraded"
@@ -78,19 +84,37 @@ func (a *Agent) sessionHealth(ctx context.Context) map[string]any {
 	}
 }
 
+// browserSupervised reports whether a Chromium supervisor is running, that is,
+// whether the browser is meant to be up.
+func (a *Agent) browserSupervised() bool {
+	a.browserMu.Lock()
+	defer a.browserMu.Unlock()
+	return a.browser != nil
+}
+
 func (a *Agent) registerHealthRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
 	mux.HandleFunc("GET /v1/health", auth(a.handleSessionHealth))
 }
 
 func (a *Agent) handleSessionHealth(w http.ResponseWriter, r *http.Request) {
-	// A transition into degraded is worth one activity-log line; repeated
-	// degraded polls are not.
-	health := a.sessionHealth(r.Context())
-	if health["status"] == "degraded" && !a.healthDegraded {
-		a.healthDegraded = true
-		a.recordEvent("health.degraded", "system", "session health degraded")
-	} else if health["status"] == "ok" {
-		a.healthDegraded = false
+	writeJSON(w, a.checkHealth(r.Context()))
+}
+
+// checkHealth runs sessionHealth and records a health.degraded event on the
+// transition into degraded. A transition is worth one activity-log line;
+// repeated degraded polls are not. /v1/health and the health_get MCP tool
+// share it, so both surfaces log the same transitions.
+func (a *Agent) checkHealth(ctx context.Context) map[string]any {
+	health := a.sessionHealth(ctx)
+	switch health["status"] {
+	case "degraded":
+		// CompareAndSwap makes exactly one of several concurrent polls
+		// record the transition.
+		if a.healthDegraded.CompareAndSwap(false, true) {
+			a.recordEvent("health.degraded", "system", "session health degraded")
+		}
+	case "ok":
+		a.healthDegraded.Store(false)
 	}
-	writeJSON(w, health)
+	return health
 }

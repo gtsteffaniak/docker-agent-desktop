@@ -311,17 +311,7 @@ func (a *Agent) mcpSessionAcquire(ctx context.Context, _ *mcp.CallToolRequest, i
 	if in.Kind != "agent" && in.Kind != "user" {
 		return nil, nil, errors.New("kind must be agent or user")
 	}
-	ttl := sessionLeaseTTL()
-	if in.TTLMs != 0 {
-		ttl = time.Duration(in.TTLMs) * time.Millisecond
-		if ttl < 10*time.Second {
-			ttl = 10 * time.Second
-		}
-		if ttl > 10*time.Minute {
-			ttl = 10 * time.Minute
-		}
-	}
-	s, held := a.acquireSession(SessionHolder{Kind: in.Kind, Name: in.Name, RunID: in.RunID}, ttl)
+	s, held := a.acquireSession(SessionHolder{Kind: in.Kind, Name: in.Name, RunID: in.RunID}, requestedLeaseTTL(in.TTLMs))
 	if held != nil {
 		return nil, nil, errors.New("session held by " + held.Holder.Name)
 	}
@@ -386,14 +376,7 @@ func (a *Agent) mcpSessionEvents(ctx context.Context, _ *mcp.CallToolRequest, in
 // --- health ---
 
 func (a *Agent) mcpHealthGet(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
-	health := a.sessionHealth(ctx)
-	if health["status"] == "degraded" && !a.healthDegraded {
-		a.healthDegraded = true
-		a.recordEvent("health.degraded", "system", "session health degraded")
-	} else if health["status"] == "ok" {
-		a.healthDegraded = false
-	}
-	return nil, health, nil
+	return nil, a.checkHealth(ctx), nil
 }
 
 // --- shell ---
@@ -631,8 +614,12 @@ func (a *Agent) mcpBrowserEvaluate(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, nil, err
 	}
+	val, err := remoteValue(raw)
+	if err != nil {
+		return nil, nil, err
+	}
 	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
+	if err := json.Unmarshal(val, &value); err != nil {
 		return nil, nil, err
 	}
 	return nil, map[string]any{"value": value}, nil

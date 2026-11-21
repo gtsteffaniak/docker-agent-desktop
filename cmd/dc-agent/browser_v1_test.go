@@ -220,18 +220,16 @@ func TestBrowserV1Evaluate(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("evaluate: %d %s", code, body)
 	}
+	// The handler unwraps the CDP RemoteObject: value is the expression's
+	// own JSON value (the fake echoes the expression as a string).
 	var out struct {
 		Value json.RawMessage `json:"value"`
 	}
 	if err := json.Unmarshal([]byte(body), &out); err != nil {
 		t.Fatal(err)
 	}
-	var remote struct {
-		Type  string `json:"type"`
-		Value string `json:"value"`
-	}
-	if err := json.Unmarshal(out.Value, &remote); err != nil || remote.Value != "1+1" {
-		t.Fatalf("value = %s, want the echoed expression", out.Value)
+	if string(out.Value) != `"1+1"` {
+		t.Fatalf("value = %s, want the bare echoed expression", out.Value)
 	}
 	calls := f.calls("Runtime.evaluate")
 	if len(calls) != 1 || calls[0]["returnByValue"] != true || calls[0]["awaitPromise"] != true {
@@ -473,5 +471,25 @@ func TestKeyCodeFor(t *testing.T) {
 		if got := keyCodeFor(in); got != want {
 			t.Errorf("keyCodeFor(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRemoteValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"type":"number","value":2,"description":"2"}`, `2`},
+		{`{"type":"string","value":"x"}`, `"x"`},
+		{`{"type":"object","value":{"a":[1,"x"]}}`, `{"a":[1,"x"]}`},
+		{`{"type":"object","subtype":"null","value":null}`, `null`},
+		{`{"type":"undefined"}`, `null`},
+		{`{"type":"boolean","value":false}`, `false`},
+	}
+	for _, c := range cases {
+		got, err := remoteValue(json.RawMessage(c.in))
+		if err != nil || string(got) != c.want {
+			t.Errorf("remoteValue(%s) = %s, %v; want %s", c.in, got, err, c.want)
+		}
+	}
+	if _, err := remoteValue(json.RawMessage(`not json`)); err == nil {
+		t.Error("remoteValue of invalid JSON should fail")
 	}
 }

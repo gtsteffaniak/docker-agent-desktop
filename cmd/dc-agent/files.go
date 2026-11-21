@@ -21,6 +21,9 @@ const maxFileRead = 10 << 20
 var errPathEscape = errors.New("path escapes home directory")
 var errTooLarge = errors.New("file exceeds 10 MiB limit")
 
+// errProtectedHome is returned for a delete or move of the home directory itself.
+var errProtectedHome = errors.New("refusing to delete or move the home directory")
+
 // homeDir is the agent user's home, the root of the file jail.
 func (a *Agent) homeDir() string {
 	return envOr("HOME", "/home/bot")
@@ -74,9 +77,39 @@ func (a *Agent) jailPath(p string) (string, error) {
 	return out, nil
 }
 
+// homeResolved is the home directory with symlinks resolved, the form
+// jailPath returns paths in.
+func (a *Agent) homeResolved() string {
+	if h, err := filepath.EvalSymlinks(a.homeDir()); err == nil {
+		return h
+	}
+	return a.homeDir()
+}
+
+// jailPathNoFollow jails p like jailPath, except that a final symlink is not
+// followed: the returned path names the link itself. Delete and move act on
+// the entry the caller named, so removing a link never removes its target
+// and a link pointing outside home can still be cleaned up.
+func (a *Agent) jailPathNoFollow(p string) (string, error) {
+	home := a.homeDir()
+	abs := p
+	if !filepath.IsAbs(p) {
+		abs = filepath.Join(home, p)
+	}
+	abs = filepath.Clean(abs)
+	if abs == home {
+		return a.homeResolved(), nil
+	}
+	parent, err := a.jailPath(filepath.Dir(abs))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(abs)), nil
+}
+
 // relHome renders an absolute jailed path as home-relative with "/" separators.
 func (a *Agent) relHome(abs string) string {
-	rel, err := filepath.Rel(a.homeDir(), abs)
+	rel, err := filepath.Rel(a.homeResolved(), abs)
 	if err != nil {
 		return abs
 	}
@@ -142,8 +175,12 @@ func (a *Agent) readFile(path string) ([]byte, error) {
 	return os.ReadFile(abs)
 }
 
-// writeFile writes data, creating parent directories as needed.
+// writeFile writes data, creating parent directories as needed. It refuses
+// content over maxFileRead, so everything written can be read back.
 func (a *Agent) writeFile(path string, data []byte) error {
+	if len(data) > maxFileRead {
+		return errTooLarge
+	}
 	abs, err := a.jailPath(path)
 	if err != nil {
 		return err
@@ -157,12 +194,12 @@ func (a *Agent) writeFile(path string, data []byte) error {
 // deletePath removes a file or directory. Directories need recursive=true
 // unless empty. The home directory itself can never be deleted.
 func (a *Agent) deletePath(path string, recursive bool) error {
-	abs, err := a.jailPath(path)
+	abs, err := a.jailPathNoFollow(path)
 	if err != nil {
 		return err
 	}
-	if abs == a.homeDir() {
-		return errors.New("refusing to delete home directory")
+	if abs == a.homeResolved() {
+		return errProtectedHome
 	}
 	if recursive {
 		return os.RemoveAll(abs)
@@ -180,14 +217,17 @@ func (a *Agent) mkdirPath(path string) error {
 
 // movePath renames within the jail. The destination must not already exist.
 func (a *Agent) movePath(from, to string) error {
-	fromAbs, err := a.jailPath(from)
+	fromAbs, err := a.jailPathNoFollow(from)
 	if err != nil {
 		return err
 	}
-	if fromAbs == a.homeDir() {
-		return errors.New("refusing to move home directory")
+	if fromAbs == a.homeResolved() {
+		return errProtectedHome
 	}
-	toAbs, err := a.jailPath(to)
+	if _, err := os.Lstat(fromAbs); err != nil {
+		return err
+	}
+	toAbs, err := a.jailPathNoFollow(to)
 	if err != nil {
 		return err
 	}
@@ -201,11 +241,12 @@ func (a *Agent) movePath(from, to string) error {
 	return os.Rename(fromAbs, toAbs)
 }
 
-// writeFileErr maps service errors to HTTP statuses: jail escapes 400,
+// writeFileErr maps service errors to HTTP statuses: jail escapes and the
+// protected home directory 400,
 // oversize 413, missing paths 404, everything else 500.
 func writeFileErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errPathEscape):
+	case errors.Is(err, errPathEscape), errors.Is(err, errProtectedHome):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errTooLarge):
 		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
@@ -287,7 +328,15 @@ func (a *Agent) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Agent) handleFilesUpload(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	// Bound the whole body, not just the file part, so an oversized upload
+	// cannot fill the disk with multipart temp files.
+	r.Body = http.MaxBytesReader(w, r.Body, maxFileRead+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			http.Error(w, errTooLarge.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -365,8 +414,8 @@ func (a *Agent) handleFilesMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.recordEvent("files.move", a.sessionHolderName(r), req.From+" -> "+req.To)
-	fromAbs, _ := a.jailPath(req.From)
-	toAbs, _ := a.jailPath(req.To)
+	fromAbs, _ := a.jailPathNoFollow(req.From)
+	toAbs, _ := a.jailPathNoFollow(req.To)
 	writeJSON(w, map[string]any{"from": a.relHome(fromAbs), "to": a.relHome(toAbs)})
 }
 

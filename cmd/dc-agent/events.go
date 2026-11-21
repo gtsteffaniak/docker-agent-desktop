@@ -1,7 +1,7 @@
 // The activity log is the dc-agent side of the computer's session history:
 // an in-memory ring of what happened (sessions, commands, app and browser
 // actions, health transitions). It is intentionally in-memory — the agent is
-// stateless across restarts — and the quantum-bots side persists what it needs
+// stateless across restarts — and the client persists what it needs
 // by polling GET /v1/session/events. Nothing here is a stub: every event type
 // listed is recorded by a real call site.
 package main

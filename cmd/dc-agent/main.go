@@ -55,8 +55,9 @@ type Agent struct {
 	// events is the in-memory activity log (see events.go).
 	events eventLog
 	// healthDegraded remembers the last /v1/health status so a transition into
-	// degraded is logged once instead of on every poll.
-	healthDegraded bool
+	// degraded is logged once instead of on every poll. It is atomic because
+	// concurrent health polls read and flip it.
+	healthDegraded atomic.Bool
 }
 
 func main() {
@@ -199,6 +200,7 @@ type statusRecorder struct {
 	status int
 }
 
+// WriteHeader records the status code and passes it on.
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)

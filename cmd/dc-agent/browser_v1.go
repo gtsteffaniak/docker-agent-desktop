@@ -63,12 +63,34 @@ func (a *Agent) handleBrowserEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), browserCallTimeout)
 	defer cancel()
-	val, err := sc.Evaluate(ctx, body.Expression)
+	raw, err := sc.Evaluate(ctx, body.Expression)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	val, err := remoteValue(raw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, map[string]any{"value": val})
+}
+
+// remoteValue unwraps a CDP RemoteObject (Runtime.evaluate with returnByValue)
+// to the expression's JSON value, so callers get 2 for "1+1" rather than
+// {"type":"number","value":2,...}. undefined, functions and other values with
+// no JSON form become null.
+func remoteValue(raw json.RawMessage) (json.RawMessage, error) {
+	var obj struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	if len(obj.Value) == 0 {
+		return json.RawMessage("null"), nil
+	}
+	return obj.Value, nil
 }
 
 // handleBrowserText returns the page's visible text.

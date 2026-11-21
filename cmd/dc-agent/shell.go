@@ -25,6 +25,25 @@ const maxShellOutput = 1 << 20
 // maxShellJobs caps the jobs map; the oldest completed job is dropped first.
 const maxShellJobs = 100
 
+// maxRetainedShellOutput caps the captured output kept across all completed
+// jobs. Each job may hold up to 2 MiB (stdout plus stderr), so without this a
+// full jobs map could pin ~200 MiB; the oldest completed jobs are dropped
+// first once the total passes this cap.
+const maxRetainedShellOutput = 16 << 20
+
+// maxRunningShellJobs caps concurrently running jobs, so a runaway caller
+// cannot fork without bound through the API.
+const maxRunningShellJobs = 32
+
+// shellWaitDelay bounds how long a job's result waits for its output pipes
+// after the job's main process exits. A command that leaves a child holding
+// stdout open (for example "sleep 600 &") would otherwise block forever,
+// because the timeout only covers the main process.
+const shellWaitDelay = 2 * time.Second
+
+// errTooManyJobs is returned when maxRunningShellJobs jobs are already running.
+var errTooManyJobs = errors.New("too many running shell jobs")
+
 // ShellExecRequest is the body of POST /v1/shell/exec. Exactly one of Command
 // and Argv must be set. Command runs via /bin/sh -c; Argv runs directly.
 type ShellExecRequest struct {
@@ -58,6 +77,10 @@ type shellJob struct {
 	killed   bool
 	timedOut bool
 	doneCh   chan struct{}
+	// out and errw capture output while the job runs, so a poll can return
+	// partial output; finish copies them into result.
+	out, errw *cappedWriter
+	start     time.Time
 }
 
 // shellJobStore is the process-wide jobs map. It is package-level because the
@@ -79,14 +102,20 @@ func newJobID() string {
 	return "job-" + hex.EncodeToString(b[:])
 }
 
-// cappedWriter keeps at most cap bytes and appends a truncation marker.
+// cappedWriter keeps at most cap bytes and appends a truncation marker. It is
+// safe for concurrent use: exec's copy goroutines write while a poll reads.
 type cappedWriter struct {
+	mu        sync.Mutex
 	buf       bytes.Buffer
 	cap       int
 	truncated bool
 }
 
+// Write keeps what fits under the cap and drops the rest. It always reports
+// len(p) so the writing process never sees a short write.
 func (w *cappedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.buf.Len() >= w.cap {
 		w.truncated = true
 		return len(p), nil
@@ -100,7 +129,10 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// String returns the captured output, with a marker when it was truncated.
 func (w *cappedWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.truncated {
 		return w.buf.String()
 	}
@@ -115,16 +147,7 @@ func (a *Agent) execShell(ctx context.Context, req ShellExecRequest) (ShellExecR
 	if (req.Command == "") == (len(req.Argv) == 0) {
 		return ShellExecResult{}, errors.New("exactly one of command or argv is required")
 	}
-	timeoutMs := req.TimeoutMs
-	if timeoutMs == 0 {
-		timeoutMs = 30000
-	}
-	if timeoutMs < 1000 {
-		timeoutMs = 1000
-	}
-	if timeoutMs > 300000 {
-		timeoutMs = 300000
-	}
+	timeoutMs := clampShellTimeout(req.TimeoutMs)
 	cwd := req.Cwd
 	if cwd == "" {
 		cwd = a.homeDir()
@@ -161,32 +184,45 @@ func (a *Agent) execShell(ctx context.Context, req ShellExecRequest) (ShellExecR
 	// Own process group so a kill takes the whole tree (children included).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	id := newJobID()
+	outW := &cappedWriter{cap: maxShellOutput}
+	errW := &cappedWriter{cap: maxShellOutput}
 	job := &shellJob{
 		result: ShellExecResult{JobID: id, Status: "running"},
 		cmd:    cmd,
 		doneCh: make(chan struct{}),
+		out:    outW,
+		errw:   errW,
 	}
-	// On timeout the context fires Cancel: kill the whole process group.
+	// When the context ends, Cancel kills the whole process group. Only a
+	// deadline is a timeout; a foreground caller that hangs up is a kill.
 	cmd.Cancel = func() error {
 		shellJobs.mu.Lock()
-		job.timedOut = true
-		shellJobs.mu.Unlock()
-		if cmd.Process == nil {
-			return nil
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			job.timedOut = true
+		} else {
+			job.killed = true
 		}
+		shellJobs.mu.Unlock()
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	outW := &cappedWriter{cap: maxShellOutput}
-	errW := &cappedWriter{cap: maxShellOutput}
+	cmd.WaitDelay = shellWaitDelay
 	cmd.Stdout = outW
 	cmd.Stderr = errW
 
-	start := time.Now()
+	// Reserve a running slot and register the job before Start, under one
+	// lock, so the running cap cannot be raced past.
+	shellJobs.mu.Lock()
+	if shellJobs.runningLocked() >= maxRunningShellJobs {
+		shellJobs.mu.Unlock()
+		cancel()
+		return ShellExecResult{}, errTooManyJobs
+	}
+	job.start = time.Now()
 	if err := cmd.Start(); err != nil {
+		shellJobs.mu.Unlock()
 		cancel()
 		return ShellExecResult{}, err
 	}
-	shellJobs.mu.Lock()
 	shellJobs.seq++
 	job.seq = shellJobs.seq
 	shellJobs.jobs[id] = job
@@ -194,8 +230,14 @@ func (a *Agent) execShell(ctx context.Context, req ShellExecRequest) (ShellExecR
 
 	go func() {
 		waitErr := cmd.Wait()
+		// The group dies with its leader: anything the job left running in
+		// its process group (backgrounded children, a stuck pipe holder) is
+		// killed, so finished jobs never leak processes. ESRCH (nothing
+		// left) is the normal case. Daemons that must outlive the job have
+		// to leave the group themselves (setsid).
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		cancel() // release the timeout timer
-		shellJobs.finish(id, waitErr, start, outW, errW)
+		shellJobs.finish(id, waitErr, cmd.ProcessState)
 	}()
 
 	if req.Background {
@@ -206,8 +248,30 @@ func (a *Agent) execShell(ctx context.Context, req ShellExecRequest) (ShellExecR
 	return res, nil
 }
 
-// finish finalizes a job's result after its process exits.
-func (s *shellJobStore) finish(id string, waitErr error, start time.Time, outW, errW *cappedWriter) {
+// clampShellTimeout applies the exec timeout rules: 0 means the 30 s
+// default, and anything else is clamped to 1 s..5 min.
+func clampShellTimeout(ms int) int {
+	if ms == 0 {
+		return 30000
+	}
+	return min(max(ms, 1000), 300000)
+}
+
+// runningLocked counts jobs that have not finished. The caller holds s.mu.
+func (s *shellJobStore) runningLocked() int {
+	n := 0
+	for _, j := range s.jobs {
+		if !j.done {
+			n++
+		}
+	}
+	return n
+}
+
+// finish finalizes a job's result after its process exits. state is the
+// main process's exit state; it is nil only when Wait failed before the
+// process was reaped.
+func (s *shellJobStore) finish(id string, waitErr error, state *os.ProcessState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.jobs[id]
@@ -215,31 +279,47 @@ func (s *shellJobStore) finish(id string, waitErr error, start time.Time, outW, 
 		return
 	}
 	res := &j.result
-	res.DurationMs = time.Since(start).Milliseconds()
-	res.Stdout = outW.String()
-	res.Stderr = errW.String()
+	res.DurationMs = time.Since(j.start).Milliseconds()
+	res.Stdout = j.out.String()
+	res.Stderr = j.errw.String()
+	j.out, j.errw = nil, nil
 	switch {
 	case j.killed:
 		res.Status = "killed"
 	case j.timedOut:
 		res.Status = "timeout"
 		res.TimedOut = true
-	case waitErr != nil:
-		res.Status = "failed"
-		var ee *exec.ExitError
-		if errors.As(waitErr, &ee) {
-			code := ee.ExitCode()
-			res.ExitCode = &code
+	case state != nil && state.Exited():
+		// ErrWaitDelay (a child kept the output pipes open after the main
+		// process exited) is not a failure of the command itself: the exit
+		// status still decides.
+		code := state.ExitCode()
+		res.ExitCode = &code
+		if code == 0 {
+			res.Status = "completed"
+		} else {
+			res.Status = "failed"
 		}
 	default:
-		res.Status = "completed"
-		code := 0
-		res.ExitCode = &code
+		_ = waitErr // killed by a signal, or Wait failed outright
+		res.Status = "failed"
 	}
 	j.done = true
 	close(j.doneCh)
-	// Cap the map at maxShellJobs by dropping the oldest completed jobs.
-	for len(s.jobs) > maxShellJobs {
+	s.pruneLocked()
+}
+
+// pruneLocked drops the oldest completed jobs while the map holds more than
+// maxShellJobs jobs or more than maxRetainedShellOutput bytes of output.
+// Running jobs are never dropped. The caller holds s.mu.
+func (s *shellJobStore) pruneLocked() {
+	retained := 0
+	for _, j := range s.jobs {
+		if j.done {
+			retained += len(j.result.Stdout) + len(j.result.Stderr)
+		}
+	}
+	for len(s.jobs) > maxShellJobs || retained > maxRetainedShellOutput {
 		var oldestID string
 		var oldestSeq uint64
 		for cid, cj := range s.jobs {
@@ -251,13 +331,16 @@ func (s *shellJobStore) finish(id string, waitErr error, start time.Time, outW, 
 			}
 		}
 		if oldestID == "" {
-			break
+			return
 		}
+		old := s.jobs[oldestID]
+		retained -= len(old.result.Stdout) + len(old.result.Stderr)
 		delete(s.jobs, oldestID)
 	}
 }
 
-// shellJob returns a copy of a job's current result.
+// shellJob returns a copy of a job's current result. A running job reports
+// the output captured so far and its elapsed time.
 func (a *Agent) shellJob(id string) (ShellExecResult, bool) {
 	shellJobs.mu.Lock()
 	defer shellJobs.mu.Unlock()
@@ -265,7 +348,19 @@ func (a *Agent) shellJob(id string) (ShellExecResult, bool) {
 	if !ok {
 		return ShellExecResult{}, false
 	}
-	return j.result, true
+	return j.snapshotLocked(), true
+}
+
+// snapshotLocked returns the job's result, with live output while it runs.
+// The caller holds shellJobs.mu.
+func (j *shellJob) snapshotLocked() ShellExecResult {
+	res := j.result
+	if !j.done && j.out != nil {
+		res.Stdout = j.out.String()
+		res.Stderr = j.errw.String()
+		res.DurationMs = time.Since(j.start).Milliseconds()
+	}
+	return res
 }
 
 // killShellJob SIGKILLs a running job's whole process group. It reports false
@@ -301,7 +396,7 @@ func (a *Agent) listShellJobs() []ShellExecResult {
 	}
 	sort.Slice(ids, func(i, j int) bool { return shellJobs.jobs[ids[i]].seq < shellJobs.jobs[ids[j]].seq })
 	for _, id := range ids {
-		out = append(out, shellJobs.jobs[id].result)
+		out = append(out, shellJobs.jobs[id].snapshotLocked())
 	}
 	return out
 }
@@ -321,7 +416,11 @@ func (a *Agent) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.execShell(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		code := http.StatusBadRequest
+		if errors.Is(err, errTooManyJobs) {
+			code = http.StatusTooManyRequests
+		}
+		http.Error(w, err.Error(), code)
 		return
 	}
 	detail := shellDisplay(req) + " (status=" + res.Status

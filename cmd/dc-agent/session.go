@@ -12,17 +12,23 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 )
 
-// defaultSessionLease is how long a session lives without a keepalive. The
-// quantum-bots side keeps a session alive every 15 s, so 90 s tolerates
-// several missed check-ins before the session is treated as abandoned.
+// defaultSessionLease is how long a session lives without a keepalive. A
+// client that keeps its session alive every 15 s can miss several check-ins
+// before the session is treated as abandoned.
 const defaultSessionLease = 90 * time.Second
 
 const sessionHeader = "X-Dc-Session"
+
+// sessionReapEvery is how often reapSessions looks for an expired lease. It is
+// a variable so tests can run the reaper quickly.
+var sessionReapEvery = 5 * time.Second
 
 // SessionHolder names whoever holds a session: an agent (with the run id) or
 // a user driving the computer from the desktop.
@@ -42,22 +48,54 @@ type Session struct {
 	ttl        time.Duration
 }
 
-// sessionStore holds the single live session, if any.
+// sessionStore holds the single live session, if any. Every read and change
+// of cur, including the expiry check, happens under mu, so a keepalive can
+// never revive a session the reaper (or a lazy read) has already expired.
 type sessionStore struct {
 	mu  sync.Mutex
 	cur *Session
+	// now is the clock; nil means time.Now. Tests replace it to drive expiry
+	// deterministically.
+	now func() time.Time
 }
 
-// sessionLeaseTTL reads DC_SESSION_LEASE_MS, clamped to 10 s..10 min.
+// clock returns the store's current time.
+func (s *sessionStore) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// minSessionLease and maxSessionLease bound every lease TTL, whether it comes
+// from DC_SESSION_LEASE_MS or a per-acquire ttl_ms.
+const (
+	minSessionLease = 10 * time.Second
+	maxSessionLease = 10 * time.Minute
+)
+
+// clampLeaseTTL clamps a lease TTL to minSessionLease..maxSessionLease.
+func clampLeaseTTL(d time.Duration) time.Duration {
+	return min(max(d, minSessionLease), maxSessionLease)
+}
+
+// sessionLeaseTTL reads DC_SESSION_LEASE_MS, clamped to 10 s..10 min. An
+// unset or unparsable value means the 90 s default.
 func sessionLeaseTTL() time.Duration {
-	n, err := strconv.Atoi(envOr("DC_SESSION_LEASE_MS", "90000"))
-	if err != nil || n < 10000 {
-		return 10 * time.Second
+	n, err := strconv.Atoi(os.Getenv("DC_SESSION_LEASE_MS"))
+	if err != nil {
+		return defaultSessionLease
 	}
-	if n > 600000 {
-		return 10 * time.Minute
+	return clampLeaseTTL(time.Duration(n) * time.Millisecond)
+}
+
+// requestedLeaseTTL is the TTL for an acquire: the environment default when
+// ttlMs is 0, otherwise ttlMs clamped like the default.
+func requestedLeaseTTL(ttlMs int) time.Duration {
+	if ttlMs == 0 {
+		return sessionLeaseTTL()
 	}
-	return time.Duration(n) * time.Millisecond
+	return clampLeaseTTL(time.Duration(ttlMs) * time.Millisecond)
 }
 
 func newSessionID() string {
@@ -66,45 +104,62 @@ func newSessionID() string {
 	return "ses_" + hex.EncodeToString(b[:])
 }
 
+// expireLocked clears cur when its lease has run out and returns the expired
+// session, or nil. The caller must hold a.sessions.mu and must record the
+// expiry with a.noteExpired after unlocking.
+func (a *Agent) expireLocked() *Session {
+	cur := a.sessions.cur
+	if cur == nil || a.sessions.clock().Before(cur.ExpiresAt) {
+		return nil
+	}
+	a.sessions.cur = nil
+	return cur
+}
+
+// noteExpired records a session.expired event for s when s is not nil.
+func (a *Agent) noteExpired(s *Session) {
+	if s != nil {
+		a.recordEvent("session.expired", s.Holder.Name, "session "+s.ID+" expired without keepalive")
+	}
+}
+
 // expireIfStale clears an expired session and records the expiry event.
 // It returns the expired session, or nil when nothing expired.
 func (a *Agent) expireIfStale() *Session {
 	a.sessions.mu.Lock()
-	cur := a.sessions.cur
-	if cur == nil || time.Now().Before(cur.ExpiresAt) {
-		a.sessions.mu.Unlock()
-		return nil
-	}
-	a.sessions.cur = nil
+	expired := a.expireLocked()
 	a.sessions.mu.Unlock()
-	a.recordEvent("session.expired", cur.Holder.Name, "session "+cur.ID+" expired without keepalive")
-	return cur
+	a.noteExpired(expired)
+	return expired
 }
 
 // liveSession returns a copy of the live session, or nil when none is held.
 // Expired sessions are closed first.
 func (a *Agent) liveSession() *Session {
-	a.expireIfStale()
 	a.sessions.mu.Lock()
-	defer a.sessions.mu.Unlock()
-	if a.sessions.cur == nil {
-		return nil
+	expired := a.expireLocked()
+	var cp *Session
+	if a.sessions.cur != nil {
+		c := *a.sessions.cur
+		cp = &c
 	}
-	cp := *a.sessions.cur
-	return &cp
+	a.sessions.mu.Unlock()
+	a.noteExpired(expired)
+	return cp
 }
 
 // acquireSession creates a session when none is live. On conflict it returns
 // the current holder as the second value so the caller can report who holds it.
 func (a *Agent) acquireSession(holder SessionHolder, ttl time.Duration) (*Session, *Session) {
-	a.expireIfStale()
-	now := time.Now()
 	a.sessions.mu.Lock()
+	expired := a.expireLocked()
 	if a.sessions.cur != nil {
 		cp := *a.sessions.cur
 		a.sessions.mu.Unlock()
+		a.noteExpired(expired)
 		return nil, &cp
 	}
+	now := a.sessions.clock()
 	s := &Session{
 		ID:         newSessionID(),
 		Holder:     holder,
@@ -115,27 +170,42 @@ func (a *Agent) acquireSession(holder SessionHolder, ttl time.Duration) (*Sessio
 	a.sessions.cur = s
 	cp := *s
 	a.sessions.mu.Unlock()
+	a.noteExpired(expired)
 	a.recordEvent("session.acquired", holder.Name, "session "+s.ID+" acquired")
 	return &cp, nil
 }
 
-// keepaliveSession extends a live session by its TTL. It errors when the id
-// is unknown, held by someone else, or already expired.
-func (a *Agent) keepaliveSession(id string) (*Session, error) {
-	a.expireIfStale()
-	now := time.Now()
-	a.sessions.mu.Lock()
-	cur := a.sessions.cur
+// errNoSession reports that no live session exists (none was acquired, or the
+// last one expired or was released).
+var errNoSession = errors.New("no session held")
+
+// ownedLocked returns the live session when it has this id. It expires a
+// stale session first; the expired session, if any, is returned so the
+// caller can record it after unlocking. The caller must hold a.sessions.mu.
+func (a *Agent) ownedLocked(id string) (cur, expired *Session, err error) {
+	expired = a.expireLocked()
+	cur = a.sessions.cur
 	if cur == nil {
-		a.sessions.mu.Unlock()
-		return nil, errors.New("no session held")
+		return nil, expired, errNoSession
 	}
 	if cur.ID != id {
-		holder := cur.Holder
-		a.sessions.mu.Unlock()
-		return nil, &sessionHeldError{holder: holder}
+		return nil, expired, &sessionHeldError{holder: cur.Holder}
 	}
-	cur.ExpiresAt = now.Add(cur.ttl)
+	return cur, expired, nil
+}
+
+// keepaliveSession extends a live session by its TTL. It errors when the id
+// is unknown, held by someone else, or already expired. The expiry check and
+// the extension happen under one lock, so an expired lease is never revived.
+func (a *Agent) keepaliveSession(id string) (*Session, error) {
+	a.sessions.mu.Lock()
+	cur, expired, err := a.ownedLocked(id)
+	if err != nil {
+		a.sessions.mu.Unlock()
+		a.noteExpired(expired)
+		return nil, err
+	}
+	cur.ExpiresAt = a.sessions.clock().Add(cur.ttl)
 	cp := *cur
 	a.sessions.mu.Unlock()
 	return &cp, nil
@@ -146,16 +216,19 @@ type sessionHeldError struct {
 	holder SessionHolder
 }
 
+// Error names the holder, matching the /v1 409 message.
 func (e *sessionHeldError) Error() string {
 	return "session held by " + e.holder.Name
 }
 
-// releaseSession ends the session with this id. It reports whether one was released.
+// releaseSession ends the session with this id. It reports whether one was
+// released; a session whose lease already ran out is expired, not released.
 func (a *Agent) releaseSession(id string) bool {
 	a.sessions.mu.Lock()
-	cur := a.sessions.cur
-	if cur == nil || cur.ID != id {
+	cur, expired, err := a.ownedLocked(id)
+	if err != nil {
 		a.sessions.mu.Unlock()
+		a.noteExpired(expired)
 		return false
 	}
 	a.sessions.cur = nil
@@ -167,25 +240,20 @@ func (a *Agent) releaseSession(id string) bool {
 // pauseSession marks a live session paused (or resumes it). While paused, the
 // session still holds the lease but mutating calls with it are refused.
 func (a *Agent) pauseSession(id string, paused bool) (*Session, error) {
-	a.expireIfStale()
 	a.sessions.mu.Lock()
-	cur := a.sessions.cur
-	if cur == nil {
+	cur, expired, err := a.ownedLocked(id)
+	if err != nil {
 		a.sessions.mu.Unlock()
-		return nil, errors.New("no session held")
-	}
-	if cur.ID != id {
-		holder := cur.Holder
-		a.sessions.mu.Unlock()
-		return nil, &sessionHeldError{holder: holder}
+		a.noteExpired(expired)
+		return nil, err
 	}
 	cur.Paused = paused
 	cp := *cur
 	a.sessions.mu.Unlock()
 	if paused {
-		a.recordEvent("session.paused", cur.Holder.Name, "session "+cur.ID+" paused")
+		a.recordEvent("session.paused", cp.Holder.Name, "session "+cp.ID+" paused")
 	} else {
-		a.recordEvent("session.resumed", cur.Holder.Name, "session "+cur.ID+" resumed")
+		a.recordEvent("session.resumed", cp.Holder.Name, "session "+cp.ID+" resumed")
 	}
 	return &cp, nil
 }
@@ -226,13 +294,15 @@ func (a *Agent) requireSession(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // writeSessionError renders a 409 that names the current holder when there is one,
-// so a waiting caller knows who to wait for (or interrupt).
+// so a waiting caller knows who to wait for (or interrupt). It never includes the
+// holder's session id: the id is what authorizes mutating calls, so handing it to
+// a contender would let any caller act under someone else's lease.
 func writeSessionError(w http.ResponseWriter, code int, msg string, holder *Session) {
 	out := map[string]any{"error": msg}
 	if holder != nil {
 		out["holder"] = holder.Holder
-		out["session_id"] = holder.ID
 		out["expires_at"] = holder.ExpiresAt
+		out["paused"] = holder.Paused
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -252,7 +322,7 @@ func (a *Agent) sessionHolderName(r *http.Request) string {
 // Expiry is also applied lazily on every session read, so a missed tick never
 // leaves a stale session live.
 func (a *Agent) reapSessions(ctx context.Context) {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(sessionReapEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -289,17 +359,7 @@ func (a *Agent) handleSessionAcquire(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "holder.kind must be agent or user", http.StatusBadRequest)
 		return
 	}
-	ttl := sessionLeaseTTL()
-	if body.TTLMs != 0 {
-		ttl = time.Duration(body.TTLMs) * time.Millisecond
-		if ttl < 10*time.Second {
-			ttl = 10 * time.Second
-		}
-		if ttl > 10*time.Minute {
-			ttl = 10 * time.Minute
-		}
-	}
-	s, held := a.acquireSession(body.Holder, ttl)
+	s, held := a.acquireSession(body.Holder, requestedLeaseTTL(body.TTLMs))
 	if held != nil {
 		writeSessionError(w, http.StatusConflict, "session held by "+held.Holder.Name, held)
 		return
@@ -393,10 +453,10 @@ func (a *Agent) runningAppIDs() []string {
 	appProcs.mu.Lock()
 	defer appProcs.mu.Unlock()
 	out := []string{}
-	for id, cmd := range appProcs.apps {
-		if cmd.ProcessState == nil {
-			out = append(out, id)
-		}
+	// A tracked app is running until its reaper removes it from the map.
+	for id := range appProcs.apps {
+		out = append(out, id)
 	}
+	sort.Strings(out)
 	return out
 }

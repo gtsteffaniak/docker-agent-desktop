@@ -148,8 +148,10 @@ func (s *Screencast) Navigate(ctx context.Context, url string) error {
 	return nil
 }
 
-// GoBack and GoForward move through the real navigation history.
-func (s *Screencast) GoBack(ctx context.Context) error    { return s.goHistory(ctx, -1) }
+// GoBack moves one step back through the real navigation history.
+func (s *Screencast) GoBack(ctx context.Context) error { return s.goHistory(ctx, -1) }
+
+// GoForward moves one step forward through the real navigation history.
 func (s *Screencast) GoForward(ctx context.Context) error { return s.goHistory(ctx, 1) }
 
 func (s *Screencast) goHistory(ctx context.Context, delta int) error {

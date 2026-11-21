@@ -54,7 +54,9 @@ func (a *Agent) ensureDisplay(port int) error {
 	if err != nil {
 		return fmt.Errorf("broadwayd not installed: %w", err)
 	}
-	cmd := exec.Command(bin, displayFor(port), "-p", strconv.Itoa(port))
+	// Loopback only: Broadway has no authentication, and dc-agent proxies every
+	// display to viewers behind its token check, so nothing else may reach it.
+	cmd := exec.Command(bin, displayFor(port), "-a", "127.0.0.1", "-p", strconv.Itoa(port))
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		return err
@@ -86,7 +88,10 @@ func (a *Agent) startApp(app apps.App) error {
 	}
 	appProcs.mu.Lock()
 	defer appProcs.mu.Unlock()
-	if cur, ok := appProcs.apps[app.ID]; ok && cur.ProcessState == nil {
+	// An app is running while it is in the map: its reaper goroutine removes it
+	// after Wait returns. ProcessState is not read here because Wait writes it
+	// without holding appProcs.mu.
+	if _, ok := appProcs.apps[app.ID]; ok {
 		return nil
 	}
 	bin, err := exec.LookPath(app.Exec[0])
@@ -94,11 +99,15 @@ func (a *Agent) startApp(app apps.App) error {
 		return fmt.Errorf("app not installed: %s", app.Exec[0])
 	}
 	cmd := exec.Command(bin, app.Exec[1:]...)
-	// Keep app output in a per-app log so GTK warnings can be read.
-	if logf, err := os.OpenFile(filepath.Join(envOr("HOME", "/home/bot"), ".dc", "logs", app.ID+".log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+	// Keep app output in a per-app log so GTK warnings can be read. The child
+	// gets its own copy of the descriptor, so the agent closes its copy once the
+	// app has started (or failed to); keeping it would leak one fd per start.
+	logf, logErr := os.OpenFile(filepath.Join(envOr("HOME", "/home/bot"), ".dc", "logs", app.ID+".log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if logErr == nil {
 		cmd.Stdout = logf
 		cmd.Stderr = logf
+		defer logf.Close()
 	}
 	cmd.Env = append(os.Environ(),
 		"GDK_BACKEND=broadway",
@@ -145,7 +154,7 @@ func (a *Agent) autostartApps() {
 func (a *Agent) stopApp(id string) error {
 	appProcs.mu.Lock()
 	cmd, ok := appProcs.apps[id]
-	if !ok || cmd == nil || cmd.Process == nil || cmd.ProcessState != nil {
+	if !ok || cmd == nil || cmd.Process == nil {
 		if ok {
 			delete(appProcs.apps, id)
 		}
@@ -187,5 +196,5 @@ func (a *Agent) appRunning(id string) bool {
 	appProcs.mu.Lock()
 	defer appProcs.mu.Unlock()
 	cmd, ok := appProcs.apps[id]
-	return ok && cmd != nil && cmd.ProcessState == nil
+	return ok && cmd != nil
 }

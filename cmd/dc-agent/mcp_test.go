@@ -524,8 +524,8 @@ func TestMCPBrowserFakeCDP(t *testing.T) {
 	mcpCallText(t, srv, 13, "browser_evaluate", map[string]any{
 		"session_id": ses.ID, "expression": "1+1",
 	}, &eval)
-	if eval.Value == nil {
-		t.Fatal("browser_evaluate returned no value")
+	if eval.Value != "1+1" {
+		t.Fatalf("browser_evaluate value = %#v, want the bare echoed expression", eval.Value)
 	}
 	var text struct {
 		Text string `json:"text"`

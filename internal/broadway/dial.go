@@ -37,6 +37,7 @@ type casedHeaderTransport struct {
 	next http.RoundTripper
 }
 
+// RoundTrip sends the request, fixing header case on WebSocket upgrades.
 func (t casedHeaderTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		r = r.Clone(r.Context())
