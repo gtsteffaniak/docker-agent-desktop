@@ -21,7 +21,7 @@ Every window is drawn by the web desktop. A GTK app renders into its own `broadw
 | `broadwayd` | Broadway display server, one per GTK app, on the port in its `apps.d` entry. |
 | `internal/apps` | Parses the `apps.d` registry: id, name, icon, order, port and exec. |
 | `internal/broadway` | Broadway protocol client. Used for the display screenshot and input endpoints. |
-| `internal/cdp` | DevTools client for the Chromium screencast, navigation state, history and input. |
+| `internal/cdp` | DevTools client for the Chromium screencast (started on the first viewer, stopped after the last), on-demand screenshots, navigation state, history and input. |
 | `docker/rootfs/usr/local/bin/entrypoint.sh` | Starts the first broadwayd (terminal's display), then execs `dc-agent`. |
 | `tini` | PID 1. Reaps children and forwards signals to the process group. |
 

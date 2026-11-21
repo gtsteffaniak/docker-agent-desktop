@@ -42,6 +42,7 @@ Printable keys reach GTK apps directly. The `dc-windows` module stops GTK from t
 - Window placement is saved in the browser's local storage per desktop, not per user.
 - Closing a window does not quit its app. Quitting an app from the desktop is not implemented.
 - The browser screencast is JPEG at about 12 frames per second. It is good for browsing, not for video.
+- The screencast runs only while a browser window is open (or a client polls `/api/browser/frame?since=N`). It stops 5 seconds after the last one goes away, so Chromium does not encode frames nobody sees.
 - GTK apps under Broadway do not get native clipboard integration beyond what the iframe allows.
 
 ## Development

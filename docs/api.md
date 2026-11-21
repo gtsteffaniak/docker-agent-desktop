@@ -16,7 +16,7 @@ Send the token from `COMPUTER_AGENT_TOKEN` in the `X-Computer-Token` header. Bro
 | GET | `/api/display/screenshot?wait=1` | yes | PNG of the terminal display (the first GTK app). `wait=1` waits up to 15 s for the first frame. |
 | POST | `/api/display/click` | yes | Body `{"x":80,"y":760}`. Left click in the terminal display. |
 | POST | `/api/display/type` | yes | Body `{"text":"hello"}`. Types ASCII text into the terminal display. |
-| GET | `/api/browser/frame` | yes | Latest Chromium screencast frame as JPEG. `?since=N` returns `204` when no newer frame exists. The `X-Frame-Seq` header carries the frame number. `503` if Chromium is not running. |
+| GET | `/api/browser/frame` | yes | A fresh screenshot of the page, taken on demand. JPEG by default; `?format=png` returns a lossless PNG, which is easier to read text from. With `?since=N` it serves the screencast for polling clients instead: each poll keeps the stream running for 5 s, the first poll after the stream was idle waits up to 3 s for a fresh frame, and `204` means no frame newer than `N` exists (JPEG only). The `X-Frame-Seq` header carries the latest screencast frame number. `503` if Chromium is not running. |
 | GET | `/api/browser/state` | yes | The page's real `url`, `title`, `can_back`, `can_forward` and a change counter `seq`. `?fmt=lines` returns plain text. |
 | POST | `/api/browser/navigate` | yes | Body `{"url":"example.com"}`. Adds `https://` (or `http://` for localhost and IP addresses). Only http, https and about:blank are allowed. |
 | POST | `/api/browser/back`, `/forward`, `/reload` | yes | Moves through real navigation history. |

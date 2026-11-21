@@ -48,15 +48,34 @@ func (a *Agent) current(w http.ResponseWriter) *cdp.Screencast {
 	return sc
 }
 
-// handleBrowserFrame returns the latest screencast JPEG. With ?since=N it returns 204 when no
-// frame newer than N exists, so the browser window can poll cheaply.
+// handleBrowserFrame returns an image of the page.
+//
+// Without ?since it takes a fresh screenshot with Page.captureScreenshot, so it works whether or
+// not anyone is watching the stream. ?format=png returns a lossless PNG (easier for agents to
+// read text from); the default is JPEG, as before.
+//
+// With ?since=N it serves the screencast for a polling client: each poll keeps the stream running
+// for cdp.DefaultLinger, and the reply is 204 when no frame newer than N exists. The first poll
+// after the stream was idle waits briefly for a fresh frame, so it does not return a stale one.
 func (a *Agent) handleBrowserFrame(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
 		return
 	}
-	if q := r.URL.Query().Get("since"); q != "" {
-		since, _ := strconv.ParseUint(q, 10, 64)
+	q := r.URL.Query()
+	format := q.Get("format")
+	if q.Has("since") {
+		if format != "" && format != "jpeg" {
+			http.Error(w, "since polling only serves jpeg frames", http.StatusBadRequest)
+			return
+		}
+		since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
+		if base := sc.Keep(); base > 0 || !sc.Streaming() {
+			// The stream was idle: wait for its first frame rather than answer with a stale one.
+			c, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			_, _, _ = sc.WaitNewer(c, base)
+			cancel()
+		}
 		frame, seq := sc.Frame()
 		w.Header().Set("X-Frame-Seq", strconv.FormatUint(seq, 10))
 		if len(frame) == 0 || seq <= since {
@@ -67,16 +86,27 @@ func (a *Agent) handleBrowserFrame(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(frame)
 		return
 	}
+	contentType := "image/jpeg"
+	switch format {
+	case "", "jpeg":
+		format = "jpeg"
+	case "png":
+		contentType = "image/png"
+	default:
+		http.Error(w, "format must be jpeg or png", http.StatusBadRequest)
+		return
+	}
 	c, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	if _, err := sc.WaitJPEG(c); err != nil {
+	img, err := sc.Capture(c, format)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusGatewayTimeout)
 		return
 	}
-	frame, seq := sc.Frame()
+	_, seq := sc.Frame()
 	w.Header().Set("X-Frame-Seq", strconv.FormatUint(seq, 10))
-	w.Header().Set("Content-Type", "image/jpeg")
-	_, _ = w.Write(frame)
+	w.Header().Set("Content-Type", contentType)
+	_, _ = w.Write(img)
 }
 
 // handleBrowserState returns the page's real URL, title and history availability. ?fmt=lines
