@@ -148,8 +148,10 @@ func (s *Screencast) Navigate(ctx context.Context, url string) error {
 	return nil
 }
 
-// GoBack and GoForward move through the real navigation history.
-func (s *Screencast) GoBack(ctx context.Context) error    { return s.goHistory(ctx, -1) }
+// GoBack moves one step back through the real navigation history.
+func (s *Screencast) GoBack(ctx context.Context) error { return s.goHistory(ctx, -1) }
+
+// GoForward moves one step forward through the real navigation history.
 func (s *Screencast) GoForward(ctx context.Context) error { return s.goHistory(ctx, 1) }
 
 func (s *Screencast) goHistory(ctx context.Context, delta int) error {
@@ -370,4 +372,53 @@ func (s *Screencast) InsertText(ctx context.Context, text string) error {
 	}
 	_, err := s.Call(ctx, "Input.insertText", map[string]any{"text": text})
 	return err
+}
+
+// Evaluate runs a JavaScript expression in the page and returns the RemoteObject it produced
+// (the result.result field of the Runtime.evaluate reply). Callers read the value out of it;
+// an expression that evaluates to undefined has no value field. A JavaScript exception is
+// returned as an error.
+func (s *Screencast) Evaluate(ctx context.Context, expr string) (json.RawMessage, error) {
+	raw, err := s.Call(ctx, "Runtime.evaluate", map[string]any{
+		"expression": expr, "returnByValue": true, "awaitPromise": true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Result json.RawMessage `json:"result"`
+		// ExceptionDetails is present when the expression threw.
+		ExceptionDetails *struct {
+			Text      string `json:"text"`
+			Exception *struct {
+				Description string `json:"description"`
+			} `json:"exception,omitempty"`
+		} `json:"exceptionDetails"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, err
+	}
+	if d := r.ExceptionDetails; d != nil {
+		msg := d.Text
+		if d.Exception != nil && d.Exception.Description != "" {
+			msg = d.Exception.Description
+		}
+		return nil, fmt.Errorf("evaluate: %s", msg)
+	}
+	return r.Result, nil
+}
+
+// PageText returns the page's visible text, or "" when the page has no body.
+func (s *Screencast) PageText(ctx context.Context) (string, error) {
+	raw, err := s.Evaluate(ctx, `document.body ? document.body.innerText : ""`)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", err
+	}
+	return r.Value, nil
 }

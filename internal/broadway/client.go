@@ -359,6 +359,52 @@ func (c *Client) pointerAt(x, y int32) Pointer {
 	return Pointer{RootX: x, RootY: y, WinX: x, WinY: y}
 }
 
+// ClickButton clicks at root coordinates with the given button (1 left, 2 middle, 3 right).
+// It finds the surface under the point, as ClickAt does.
+func (c *Client) ClickButton(x, y int32, button uint32) error {
+	if button < 1 || button > 3 {
+		return fmt.Errorf("broadway: unknown button %d", button)
+	}
+	p := c.pointerAt(x, y)
+	return c.send(func(e *InputEncoder) [][]byte { return e.ClickButton(p, button) })
+}
+
+// Key presses and releases one keysym with the given GDK modifier state
+// (Shift 1, Control 4, Alt 8).
+func (c *Client) Key(keysym uint32, mods uint32) error {
+	return c.send(func(e *InputEncoder) [][]byte { return e.PressKey(keysym, mods) })
+}
+
+// ScrollAt scrolls vertically at root coordinates, one button press per ~120 units of dy
+// (button 4 up, 5 down). Horizontal scrolling is not supported by the Broadway encoder: dx
+// is ignored.
+func (c *Client) ScrollAt(x, y int32, dx, dy int) error {
+	if dy == 0 {
+		return nil
+	}
+	button := uint32(5)
+	if dy < 0 {
+		button = 4
+	}
+	presses := (absInt(dy) + 119) / 120
+	p := c.pointerAt(x, y)
+	return c.send(func(e *InputEncoder) [][]byte { return e.ScrollButton(p, button, presses) })
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// Drag presses the left button at (x1, y1), moves to (x2, y2) in steps, then releases.
+func (c *Client) Drag(x1, y1, x2, y2 int32) error {
+	from := c.pointerAt(x1, y1)
+	to := c.pointerAt(x2, y2)
+	return c.send(func(e *InputEncoder) [][]byte { return e.Drag(from, to) })
+}
+
 // TypeText injects keystrokes.
 func (c *Client) TypeText(text string) error {
 	return c.send(func(e *InputEncoder) [][]byte { return e.TypeText(text) })

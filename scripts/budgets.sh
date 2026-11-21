@@ -11,6 +11,7 @@ idle_budget_mb=60
 browser_budget_mb=400
 boot_budget_s=3
 
+# shellcheck disable=SC2317 # invoked by the EXIT trap
 cleanup() { $DOCKER rm -f "$NAME" "${NAME}-browser" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 

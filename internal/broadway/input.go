@@ -2,6 +2,8 @@ package broadway
 
 import (
 	"encoding/binary"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -107,15 +109,97 @@ func (e *InputEncoder) KeyRelease(keysym uint32) []byte {
 // Click moves to p, crossing into its surface first if the pointer was elsewhere, then presses
 // and releases the left button.
 func (e *InputEncoder) Click(p Pointer) [][]byte {
+	return e.ClickButton(p, 1)
+}
+
+// ClickButton moves to p, crossing into its surface first if the pointer was elsewhere, then
+// presses and releases the given button (1 left, 2 middle, 3 right).
+func (e *InputEncoder) ClickButton(p Pointer, button uint32) [][]byte {
 	var out [][]byte
 	if p.Surface != e.MouseWin {
 		out = append(out, e.Enter(p))
 	}
 	return append(out,
 		e.PointerMove(p),
-		e.ButtonPress(p, 1),
-		e.ButtonRelease(p, 1),
+		e.ButtonPress(p, button),
+		e.ButtonRelease(p, button),
 	)
+}
+
+// PressKey sends a keysym press and release with the given modifier state, then restores the
+// encoder's previous state.
+func (e *InputEncoder) PressKey(keysym uint32, mods uint32) [][]byte {
+	prev := e.LastState
+	e.LastState = mods
+	out := [][]byte{e.KeyPress(keysym), e.KeyRelease(keysym)}
+	e.LastState = prev
+	return out
+}
+
+// ScrollButton moves to p and then presses and releases button presses times. Button 4 scrolls
+// up and button 5 scrolls down in X numbering; that is how the Broadway client reports wheel
+// input, since there is no separate scroll event in the encoder.
+func (e *InputEncoder) ScrollButton(p Pointer, button uint32, presses int) [][]byte {
+	var out [][]byte
+	if p.Surface != e.MouseWin {
+		out = append(out, e.Enter(p))
+	}
+	out = append(out, e.PointerMove(p))
+	for i := 0; i < presses; i++ {
+		out = append(out, e.ButtonPress(p, button), e.ButtonRelease(p, button))
+	}
+	return out
+}
+
+// Drag presses the left button at from, moves to to in 10 steps, then releases.
+func (e *InputEncoder) Drag(from, to Pointer) [][]byte {
+	var out [][]byte
+	if from.Surface != e.MouseWin {
+		out = append(out, e.Enter(from))
+	}
+	out = append(out, e.PointerMove(from), e.ButtonPress(from, 1))
+	for i := 1; i <= 10; i++ {
+		p := Pointer{
+			Surface: to.Surface,
+			RootX:   from.RootX + (to.RootX-from.RootX)*int32(i)/10,
+			RootY:   from.RootY + (to.RootY-from.RootY)*int32(i)/10,
+			WinX:    from.WinX + (to.WinX-from.WinX)*int32(i)/10,
+			WinY:    from.WinY + (to.WinY-from.WinY)*int32(i)/10,
+		}
+		out = append(out, e.PointerMove(p))
+	}
+	return append(out, e.ButtonRelease(to, 1))
+}
+
+// namedKeysyms maps key names to X keysyms. Single characters are handled by keysymFor.
+var namedKeysyms = map[string]uint32{
+	"Return": 0xff0d, "Enter": 0xff0d,
+	"Tab": 0xff09, "Escape": 0xff1b, "Esc": 0xff1b,
+	"BackSpace": 0xff08, "Delete": 0xffff, "Insert": 0xff63,
+	"ArrowLeft": 0xff51, "Left": 0xff51,
+	"ArrowUp": 0xff52, "Up": 0xff52,
+	"ArrowRight": 0xff53, "Right": 0xff53,
+	"ArrowDown": 0xff54, "Down": 0xff54,
+	"Home": 0xff50, "End": 0xff57,
+	"PageUp": 0xff55, "PageDown": 0xff56,
+	"Space": 0x20,
+}
+
+// KeysymForName maps a key name to its X keysym: the named keys above, F1–F12, and any single
+// character. It reports false for anything else.
+func KeysymForName(name string) (uint32, bool) {
+	if ks, ok := namedKeysyms[name]; ok {
+		return ks, true
+	}
+	if strings.HasPrefix(name, "F") {
+		if n, err := strconv.Atoi(name[1:]); err == nil && n >= 1 && n <= 12 {
+			return 0xffbe + uint32(n-1), true
+		}
+	}
+	if r := []rune(name); len(r) == 1 {
+		return keysymFor(r[0]), true
+	}
+	return 0, false
 }
 
 // keysymFor maps a typed rune to the X keysym the browser client sends for it. Printable

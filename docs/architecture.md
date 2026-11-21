@@ -15,6 +15,13 @@ Every window is drawn by the web desktop. A GTK app renders into its own `broadw
 | Component | Role |
 |-----------|------|
 | `cmd/dc-agent` | The only published process. Serves the desktop, proxies each app's Broadway display, and runs the HTTP API and the browser endpoints. |
+| `cmd/dc-agent/session.go` | The single live session lease: acquire/keepalive/release/pause/resume, the `X-Dc-Session` gate for mutating `/v1` calls, and the 5 s reaper (see [sessions.md](sessions.md)). |
+| `cmd/dc-agent/events.go` | The in-memory activity log (ring, cap 500) behind `GET /v1/session/events`. |
+| `cmd/dc-agent/health.go` | Real session health for `GET /v1/health` (Chromium, Broadway, disk, session). `/healthz` stays a bare 200 for container liveness. |
+| `cmd/dc-agent/shell.go` | Shell exec service: foreground/background jobs, process groups, capped output. |
+| `cmd/dc-agent/files.go` | File service jailed under the agent user's home. |
+| `cmd/dc-agent/browser_v1.go`, `display_v1.go`, `apps_v1.go` | The `/v1` browser, display and app surfaces. |
+| `cmd/dc-agent/mcp.go` | The MCP server at `POST /mcp`, wrapping the same service methods (see [mcp.md](mcp.md)). |
 | `cmd/dc-agent/desktop` | The web desktop: a window manager, the dock, and the browser window, in plain HTML, CSS and JavaScript. Embedded in the agent. |
 | `cmd/dc-agent/appproc.go` | Starts each app's `broadwayd` display and the app, on demand or at boot. |
 | `cmd/dc-windows` | GTK module loaded into every app. Keeps printable keys out of menubar mnemonics, strips the app's decorations, and maximizes it. |

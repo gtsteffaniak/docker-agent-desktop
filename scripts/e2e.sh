@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# End-to-end checks: health, auth, the web desktop, the app registry, per-app Broadway pages,
-# and the browser window's screencast, navigation state and history.
+# End-to-end checks against the real image (real Chromium and broadwayd, no fakes): health, auth,
+# the web desktop, the app registry, per-app Broadway pages, the browser window's screencast,
+# navigation state and history, network exposure, and then the full /v1 API and MCP server
+# (scripts/e2e_v1.py).
 set -euo pipefail
 
 IMAGE="${DC_IMAGE:-docker-computer:dev}"
@@ -16,6 +18,7 @@ fail() { echo "FAIL: $*" >&2; $DOCKER logs "$NAME" 2>&1 | tail -n 50 >&2 || true
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
   -e COMPUTER_AGENT_TOKEN="$TOKEN" \
   -e DC_BROWSER_START=boot \
+  -e DC_BROWSER_HOME=about:blank \
   -e DESKTOP_WIDTH=1280 \
   -e DESKTOP_HEIGHT=800 \
   "$IMAGE" >/dev/null
@@ -82,7 +85,13 @@ done
 echo OK
 
 echo "== cdp screencast =="
-curl -sf -m 30 "${H[@]}" "$BASE/api/browser/frame" -o "$WORKDIR/browser.jpg" || fail "browser frame"
+# Chromium boots in the background: the frame route is 503 until its screencast is attached.
+ok=0
+for _ in $(seq 1 120); do
+  if curl -sf -m 30 "${H[@]}" "$BASE/api/browser/frame" -o "$WORKDIR/browser.jpg"; then ok=1; break; fi
+  sleep 0.25
+done
+[[ $ok == 1 ]] || fail "browser frame"
 python3 -I - "$WORKDIR/browser.jpg" <<'PY' || fail "browser frame is not a JPEG"
 import sys
 d = open(sys.argv[1], 'rb').read()
@@ -111,8 +120,70 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: applic
 curl -sf "${H[@]}" -X POST "$BASE/api/browser/back" >/dev/null || fail "back"
 echo OK
 
+echo "== v1 api: sessions, shell, files, health, apps, browser, display =="
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/v1/meta")
+[[ "$code" == 200 ]] || fail "v1/meta returned $code, want 200"
+curl -sf "${H[@]}" "$BASE/v1/meta" | grep -q '"api_version":"1"' || fail "v1/meta is not api_version 1"
+# Mutating calls without a session are 409.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"command":"echo hi"}' "$BASE/v1/shell/exec")
+[[ "$code" == 409 ]] || fail "shell exec without a session returned $code, want 409"
+SID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e"}}' "$BASE/v1/session/acquire" \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+[[ -n "$SID" ]] || fail "session acquire returned no id"
+S=(-H "X-Dc-Session: $SID")
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"command":"echo e2e-ok"}' \
+  "$BASE/v1/shell/exec" | grep -q 'e2e-ok' || fail "shell exec did not echo"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
+  "$BASE/v1/session/keepalive" >/dev/null || fail "keepalive"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' \
+  -d '{"path":"e2e.txt","content":"hello-v1","encoding":"text"}' "$BASE/v1/files/write" >/dev/null || fail "files write"
+curl -sf "${H[@]}" "$BASE/v1/files/read?path=e2e.txt" | grep -q 'hello-v1' || fail "files read did not return the written content"
+curl -sf "${H[@]}" "$BASE/v1/files/list?path=" | grep -q 'e2e.txt' || fail "files list missing e2e.txt"
+curl -sf "${H[@]}" "${S[@]}" -X DELETE "$BASE/v1/files?path=e2e.txt" >/dev/null || fail "files delete"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"expression":"1+1"}' \
+  "$BASE/v1/browser/evaluate" | grep -q '"value":2' || fail "browser evaluate did not return 2"
+curl -sf "${H[@]}" "$BASE/v1/display/screenshot" -o "$WORKDIR/v1-display.png" || fail "v1 display screenshot"
+python3 -I - "$WORKDIR/v1-display.png" <<'PY' || fail "v1 display screenshot is not a PNG"
+import sys
+d = open(sys.argv[1], 'rb').read()
+assert d[:4] == b'\x89PNG' and len(d) > 100, len(d)
+print("png_bytes", len(d))
+PY
+curl -sf "${H[@]}" "$BASE/v1/apps" | python3 -I -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)["apps"]}; assert a["terminal"]["running"], a' \
+  || fail "v1/apps should report terminal running"
+curl -sf "${H[@]}" "$BASE/v1/session/events" | grep -q 'shell.exec' || fail "session events missing shell.exec"
+curl -sf "${H[@]}" "$BASE/v1/health" | python3 -I -c 'import json,sys; h=json.load(sys.stdin); assert h["status"]=="ok", h; assert h["checks"]["chromium"]=="ok", h' \
+  || fail "v1/health is not ok"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/mcp")
+[[ "$code" == 405 ]] || fail "GET /mcp returned $code, want 405"
+curl -sf "${H[@]}" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}' \
+  "$BASE/mcp" | grep -q '"result"' || fail "MCP initialize did not return a result"
+curl -sf "${H[@]}" "${S[@]}" -X POST -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
+  "$BASE/v1/session/release" >/dev/null || fail "session release"
+echo OK
+
 echo "== gtk app and broadway display processes running =="
 $DOCKER exec "$NAME" sh -c 'pgrep -x lxterminal >/dev/null && pgrep -x broadwayd >/dev/null' || fail "terminal or broadwayd not running"
 echo OK
+
+echo "== network exposure: only the agent port is reachable from other containers =="
+# Broadway has no authentication, so every broadwayd must listen on loopback only. Probe the
+# container's address from a second container on the same network.
+ip=$($DOCKER inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
+[[ -n "$ip" ]] || fail "no container IP"
+probe() { $DOCKER run --rm --entrypoint curl "$IMAGE" -s -o /dev/null -m 3 -w '%{http_code}' "http://$ip:$1/$2" || true; }
+code=$(probe 8080 healthz)
+[[ "$code" == 200 ]] || fail "agent port 8080 should be reachable from the network, got '$code'"
+for port in 8081 8082 8083; do
+  code=$(probe "$port" "")
+  [[ "$code" == 000 ]] || fail "broadwayd port $port is reachable from the network (HTTP $code)"
+done
+echo OK
+
+echo "== v1 api and MCP (real Chromium + broadwayd) =="
+python3 -I "$(dirname "$0")/e2e_v1.py" "$BASE" "$TOKEN" "$NAME" "$DOCKER" || fail "v1/MCP e2e"
 
 echo "E2E passed"

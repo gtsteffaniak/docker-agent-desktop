@@ -1,8 +1,11 @@
 # dive CI rules for docker-computer. dive --ci fails the gate when any rule is broken.
-# Calibrated on the runtime image (efficiency ~99.6%, wasted ~4.5 MB). The thresholds sit just
-# above that baseline, so a step that re-creates a large tree (for example a chown -R of /usr or a
-# COPY of a build directory into the runtime stage) fails the gate.
+# Calibrated on the runtime image (efficiency ~98-99.6%, wasted 4.5-21 MB). The wasted figure
+# moves with the base image: when debian:trixie-slim lags the archive, apt re-installs updated
+# base packages (libssl3t64/libcrypto alone are ~16 MB) over the copies in the base layer, and
+# dive counts both. The thresholds sit above that drift but far below what a step that
+# re-creates a large tree costs (a chown -R of /usr, or a COPY of a build directory into the
+# runtime stage, wastes hundreds of MB), so those still fail the gate.
 rules:
-  highestWastedBytes: 20MB
+  highestWastedBytes: 32MB
   highestUserWastedPercent: 0.05
   lowestEfficiency: 0.97

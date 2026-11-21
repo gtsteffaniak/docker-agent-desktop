@@ -3,3 +3,4 @@
 *.jpg
 /tmp/.build/
 .build/
+__pycache__/

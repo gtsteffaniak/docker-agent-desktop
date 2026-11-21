@@ -67,7 +67,7 @@ COPY docker/rootfs/etc/dc/apps.d/ /etc/dc/apps.d/
 LABEL org.opencontainers.image.title="docker-computer" \
       org.opencontainers.image.description="Web desktop with GTK 3 apps, a headless browser and an agent API" \
       org.opencontainers.image.licenses="MIT" \
-      io.docker-computer.api-version="0"
+      io.docker-computer.api-version="1"
 
 USER 1000:1000
 WORKDIR /home/bot
