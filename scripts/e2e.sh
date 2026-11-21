@@ -111,6 +111,51 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: applic
 curl -sf "${H[@]}" -X POST "$BASE/api/browser/back" >/dev/null || fail "back"
 echo OK
 
+echo "== v1 api: sessions, shell, files, health, apps, browser, display =="
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/v1/meta")
+[[ "$code" == 200 ]] || fail "v1/meta returned $code, want 200"
+curl -sf "${H[@]}" "$BASE/v1/meta" | grep -q '"api_version":"1"' || fail "v1/meta is not api_version 1"
+# Mutating calls without a session are 409.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"command":"echo hi"}' "$BASE/v1/shell/exec")
+[[ "$code" == 409 ]] || fail "shell exec without a session returned $code, want 409"
+SID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e"}}' "$BASE/v1/session/acquire" \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+[[ -n "$SID" ]] || fail "session acquire returned no id"
+S=(-H "X-Dc-Session: $SID")
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"command":"echo e2e-ok"}' \
+  "$BASE/v1/shell/exec" | grep -q 'e2e-ok' || fail "shell exec did not echo"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
+  "$BASE/v1/session/keepalive" >/dev/null || fail "keepalive"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' \
+  -d '{"path":"e2e.txt","content":"hello-v1","encoding":"text"}' "$BASE/v1/files/write" >/dev/null || fail "files write"
+curl -sf "${H[@]}" "$BASE/v1/files/read?path=e2e.txt" | grep -q 'hello-v1' || fail "files read did not return the written content"
+curl -sf "${H[@]}" "$BASE/v1/files/list?path=" | grep -q 'e2e.txt' || fail "files list missing e2e.txt"
+curl -sf "${H[@]}" "${S[@]}" -X DELETE "$BASE/v1/files?path=e2e.txt" >/dev/null || fail "files delete"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"expression":"1+1"}' \
+  "$BASE/v1/browser/evaluate" | grep -q '"value":2' || fail "browser evaluate did not return 2"
+curl -sf "${H[@]}" "$BASE/v1/display/screenshot" -o "$WORKDIR/v1-display.png" || fail "v1 display screenshot"
+python3 -I - "$WORKDIR/v1-display.png" <<'PY' || fail "v1 display screenshot is not a PNG"
+import sys
+d = open(sys.argv[1], 'rb').read()
+assert d[:4] == b'\x89PNG' and len(d) > 100, len(d)
+print("png_bytes", len(d))
+PY
+curl -sf "${H[@]}" "$BASE/v1/apps" | python3 -I -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)["apps"]}; assert a["terminal"]["running"], a' \
+  || fail "v1/apps should report terminal running"
+curl -sf "${H[@]}" "$BASE/v1/session/events" | grep -q 'shell.exec' || fail "session events missing shell.exec"
+curl -sf "${H[@]}" "$BASE/v1/health" | python3 -I -c 'import json,sys; h=json.load(sys.stdin); assert h["status"]=="ok", h; assert h["checks"]["chromium"]=="ok", h' \
+  || fail "v1/health is not ok"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/mcp")
+[[ "$code" == 405 ]] || fail "GET /mcp returned $code, want 405"
+curl -sf "${H[@]}" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}' \
+  "$BASE/mcp" | grep -q '"result"' || fail "MCP initialize did not return a result"
+curl -sf "${H[@]}" "${S[@]}" -X POST -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
+  "$BASE/v1/session/release" >/dev/null || fail "session release"
+echo OK
+
 echo "== gtk app and broadway display processes running =="
 $DOCKER exec "$NAME" sh -c 'pgrep -x lxterminal >/dev/null && pgrep -x broadwayd >/dev/null' || fail "terminal or broadwayd not running"
 echo OK

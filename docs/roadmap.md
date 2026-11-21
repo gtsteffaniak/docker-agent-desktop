@@ -2,17 +2,19 @@
 
 ## Known gaps
 
-- Closing a window does not quit its app. There is no quit action yet.
 - The desktop has no clipboard sharing between apps, and no audio.
-- The `/api/display/*` endpoints send ASCII text and left click to the terminal display only. Browser input (pointer, scroll, keys, paste) goes through `/api/browser/input`.
 - Broadway command parsing for some opcodes (`r`, `R`, `p`, `g`, `u`, `k`) skips fields without checking their widths against the protocol. Verify against GTK's `broadway.js` before relying on them.
-- The `/api/` endpoints are not yet a stable API. They will move to a stable `/v1` API with apps, files and recording.
 - Chromium runs with `--no-sandbox` inside the container. Acceptable for a single-tenant container, but revisit before multi-tenant use.
 - No resource limits are documented yet. Recommended run flags: `--memory`, `--pids-limit`, `--cap-drop=ALL`, `--read-only` with writable volumes for `/home/bot`.
 
+## Done
+
+- Stable `/v1` API for apps, files, shell, browser and display input, with a session lease, real session health, and an activity log (see [api.md](api.md) and [sessions.md](sessions.md)).
+- App quit: `POST /v1/apps/stop` (SIGTERM, 5 s grace, SIGKILL) and `POST /v1/browser/stop`.
+- Broader input: right/middle click, drag, scroll and key combinations on the display; selector-based click/type/select/scroll/key in the browser.
+- MCP server wrapping the same surface at `POST /mcp` (see [mcp.md](mcp.md)).
+
 ## Planned
 
-1. Stable `/v1` API for apps, files, input and recording.
-2. Broader input: right click, drag, scroll and key combinations.
-3. Resource limits and hardening guide.
-4. Slim the image further once the Node toolchain is needed again.
+1. Resource limits and hardening guide.
+2. Slim the image further once the Node toolchain is needed again.

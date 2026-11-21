@@ -47,6 +47,16 @@ type Agent struct {
 	// lastActivity is the last time a client sent a command or opened the browser window. It drives
 	// the idle shutdown in browser_idle.go.
 	lastActivity atomic.Int64
+
+	// startedAt is when this agent process started, for uptime in health/session state.
+	startedAt time.Time
+	// sessions is the single live session lease, if any (see session.go).
+	sessions sessionStore
+	// events is the in-memory activity log (see events.go).
+	events eventLog
+	// healthDegraded remembers the last /v1/health status so a transition into
+	// degraded is logged once instead of on every poll.
+	healthDegraded bool
 }
 
 func main() {
@@ -81,16 +91,18 @@ func run(token string, log *slog.Logger) error {
 	go func() { _ = client.Run(ctx) }()
 	defer client.Close()
 
-	a := &Agent{token: token, log: log, broadway: client, bg: bg, root: ctx}
+	a := &Agent{token: token, log: log, broadway: client, bg: bg, root: ctx, startedAt: time.Now()}
 	go a.watchBrowserIdle(ctx)
 	go a.maybeStartChromium(ctx)
 	go a.autostartApps()
+	go a.reapSessions(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /v1/health", a.auth(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	// /v1/health is the real session health check, registered by registerV1 below.
+	// /healthz above stays a bare 200: container liveness only.
 	mux.HandleFunc("GET /v1/meta", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]string{"api_version": "0"})
+		writeJSON(w, map[string]string{"api_version": "1"})
 	})
 	mux.HandleFunc("GET /api/display/meta", a.auth(a.handleBroadwayMeta))
 	mux.HandleFunc("GET /api/display/screenshot", a.auth(a.handleScreenshot))
@@ -99,6 +111,8 @@ func run(token string, log *slog.Logger) error {
 	a.registerBrowser(mux, a.auth)
 	mux.HandleFunc("GET /api/apps", a.auth(a.handleApps))
 	mux.HandleFunc("POST /api/apps/start", a.auth(a.handleAppStart))
+	a.registerV1(mux, a.auth)
+	a.registerMCP(mux, a.auth)
 	a.mountPortal(mux)
 
 	addr := envOr("DC_AGENT_ADDR", "0.0.0.0:8080")

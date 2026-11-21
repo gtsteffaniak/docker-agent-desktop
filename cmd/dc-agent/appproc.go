@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gtsteffaniak/docker-computer/internal/apps"
@@ -135,4 +136,56 @@ func (a *Agent) autostartApps() {
 			a.log.Warn("autostart failed", "app", app.ID, "err", err)
 		}
 	}
+}
+
+// stopApp ends a tracked app process: SIGTERM, up to 5 s to exit, then SIGKILL. The app's
+// broadwayd display keeps running for reuse. It returns nil when the app is not running.
+// The exit is observed by polling for the process to be reaped (signal 0 fails once the
+// startApp reaper has waited on it), because the reaper owns the only cmd.Wait call.
+func (a *Agent) stopApp(id string) error {
+	appProcs.mu.Lock()
+	cmd, ok := appProcs.apps[id]
+	if !ok || cmd == nil || cmd.Process == nil || cmd.ProcessState != nil {
+		if ok {
+			delete(appProcs.apps, id)
+		}
+		appProcs.mu.Unlock()
+		return nil
+	}
+	delete(appProcs.apps, id)
+	appProcs.mu.Unlock()
+
+	proc := cmd.Process
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return nil // already finished; the reaper cleans up
+	}
+	if exited(proc, 5*time.Second) {
+		return nil
+	}
+	_ = proc.Kill()
+	exited(proc, time.Second)
+	return nil
+}
+
+// exited reports whether proc has been reaped within d. A zombie still answers signal 0, so
+// this only returns true once the reaper has waited on it.
+func exited(proc *os.Process, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// appRunning reports whether the app has a live tracked process.
+func (a *Agent) appRunning(id string) bool {
+	appProcs.mu.Lock()
+	defer appProcs.mu.Unlock()
+	cmd, ok := appProcs.apps[id]
+	return ok && cmd != nil && cmd.ProcessState == nil
 }
