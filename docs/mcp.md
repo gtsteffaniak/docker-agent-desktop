@@ -1,6 +1,6 @@
 # MCP server
 
-`dc-agent` exposes the same computer surface as an MCP server at `POST /mcp`, so an agent host (today: quantum-bots; any MCP client) can drive the computer without speaking raw HTTP. The MCP tools call the same service methods the `/v1` HTTP handlers call — never HTTP to self — so the two surfaces cannot drift apart.
+`dc-agent` exposes the same computer surface as an MCP server at `POST /mcp`, so an agent host (any MCP client) can drive the computer without speaking raw HTTP. The MCP tools call the same service methods the `/v1` HTTP handlers call — never HTTP to self — so the two surfaces cannot drift apart.
 
 ## Transport
 
@@ -93,7 +93,7 @@ rpc("tools/call", {"name": "session_release", "arguments": {"session_id": sid}},
 
 (Notifications such as `notifications/initialized` carry no `id` and get no response — send them fire-and-forget, or skip them; the stateless handler does not require them.)
 
-## What the quantum-bots side needs
+## What an MCP client needs
 
 - Point its MCP client at `POST /mcp` with the agent token, acquire one session per run, keepalive every ~15 s, and release on run end.
 - The computer is single-session: a second run gets `session held by <name>` and must wait (poll `session_get`) or ask the user, not force-take.

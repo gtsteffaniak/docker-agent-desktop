@@ -24,7 +24,11 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   export DBUS_SESSION_BUS_ADDRESS
 fi
 
-broadwayd "${BROADWAY_DISPLAY}" -p "${BROADWAY_PORT}" &
+# Loopback only: Broadway has no authentication; dc-agent proxies it behind the token check.
+# The subshell makes broadwayd an orphan of tini (PID 1) instead of a child of this shell, which
+# becomes dc-agent on exec below. dc-agent never waits on a child it did not start, so a
+# broadwayd that exits under it would stay a zombie; tini reaps it instead.
+( broadwayd "${BROADWAY_DISPLAY}" -a 127.0.0.1 -p "${BROADWAY_PORT}" & )
 
 ready=0
 for _ in $(seq 1 100); do

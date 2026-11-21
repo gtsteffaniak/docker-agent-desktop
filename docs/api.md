@@ -17,13 +17,13 @@ At most one live session may drive the computer at a time. A caller acquires a s
 A mutating call without a valid session gets `409 Conflict` with a JSON body naming the current holder when there is one:
 
 ```json
-{"error": "session held by agent-run-7", "holder": {"kind": "agent", "name": "agent-run-7"}, "session_id": "ses_…", "expires_at": "…"}
+{"error": "session held by agent-run-7", "holder": {"kind": "agent", "name": "agent-run-7"}, "expires_at": "…", "paused": false}
 ```
 
 ### Health
 
 - `GET /healthz` (no auth) is container liveness only: a bare `200` when the process is up. It says nothing about whether the session is usable, and it is intentionally not changed.
-- `GET /v1/health` (auth) is the real session health check: it probes Chromium (via a live CDP call, unless `DC_BROWSER_START=off`, in which case it reports `disabled`), the Broadway display, free disk on the home volume, and the live session. Overall `status` is `ok` or `degraded`, with a per-check breakdown in `checks`.
+- `GET /v1/health` (auth) is the real session health check: it probes Chromium (via a live CDP call; `disabled` when `DC_BROWSER_START=off`, and `stopped` — not a failure — when the browser simply is not running because it has not been needed yet, was stopped, or was shut down idle; only a browser that should be running but has no working CDP connection is `down`), the Broadway display, free disk on the home volume, and the live session. Overall `status` is `ok` or `degraded`, with a per-check breakdown in `checks`.
 
 ### Endpoints
 
@@ -39,20 +39,20 @@ A mutating call without a valid session gets `409 Conflict` with a JSON body nam
 | POST | `/v1/session/resume` | no | Body `{"session_id":"…"}`. |
 | GET | `/v1/session` | no | The live session (or `null`), browser/viewer/app state, uptime. |
 | GET | `/v1/session/events?since=N&limit=100` | no | Activity log: sessions, shell/files/apps/browser actions, health transitions. `latest_seq` for polling. |
-| POST | `/v1/shell/exec` | yes | Body `{"command":"…"} ` or `{"argv":["…"]}`, optional `cwd` (jailed under home), `timeout_ms` (default 30000, clamp 1000–300000), `env`, `background`. Foreground returns the finished result (`status`, `exit_code`, `stdout`, `stderr`, capped at 1 MiB each); `background:true` returns `{job_id, status:"running"}`. Non-zero exit is `status:"failed"`, not an HTTP error. |
+| POST | `/v1/shell/exec` | yes | Body `{"command":"…"} ` or `{"argv":["…"]}`, optional `cwd` (jailed under home), `timeout_ms` (default 30000, clamp 1000–300000), `env`, `background`. Foreground returns the finished result (`status`, `exit_code`, `stdout`, `stderr`, capped at 1 MiB each); `background:true` returns `{job_id, status:"running"}`. Non-zero exit is `status:"failed"`, not an HTTP error. A job runs in its own process group, and the group dies with its main process: anything it left running (for example `cmd &`) is killed when the main process exits, and a child holding stdout open cannot delay the result by more than 2 s. Daemons that must outlive the call leave the group themselves (`setsid`). At most 32 jobs run at once (`429` beyond that); completed jobs keep at most 16 MiB of output in total, oldest dropped first. |
 | GET | `/v1/shell/jobs` | no | All tracked jobs, oldest first. |
-| GET | `/v1/shell/jobs/{id}` | no | One job. `404` when unknown. |
+| GET | `/v1/shell/jobs/{id}` | no | One job. While it runs, `stdout`/`stderr` hold the output so far. `404` when unknown. |
 | POST | `/v1/shell/jobs/{id}/kill` | yes | SIGKILLs the job's whole process group. |
 | GET | `/v1/files/list?path=` | no | Directory listing. Paths are home-relative; entries carry `name`, `path`, `type`, `size`, `mod_time`. |
 | GET | `/v1/files/read?path=` | no | Raw file bytes (10 MiB cap, `413` over). `?download=1` sets an attachment disposition. |
-| POST | `/v1/files/write` | yes | Body `{"path":"…","content":"…","encoding":"text"\|"base64"}`. Creates parent dirs. |
+| POST | `/v1/files/write` | yes | Body `{"path":"…","content":"…","encoding":"text"\|"base64"}`. Creates parent dirs. Content over 10 MiB is `413`. |
 | POST | `/v1/files/upload` | yes | Multipart `file` + `path`. A trailing slash or existing directory means "into this directory". 10 MiB cap. |
 | POST | `/v1/files/mkdir` | yes | Body `{"path":"…"}`. |
-| POST | `/v1/files/move` | yes | Body `{"from":"…","to":"…"}`. Never overwrites an existing destination. |
-| DELETE | `/v1/files?path=&recursive=1` | yes | Deletes a file, or a directory with `recursive=1`. Home itself can never be deleted. |
+| POST | `/v1/files/move` | yes | Body `{"from":"…","to":"…"}`. Never overwrites an existing destination. A symlink is moved as the link, not its target. |
+| DELETE | `/v1/files?path=&recursive=1` | yes | Deletes a file, or a directory with `recursive=1`. Home itself can never be deleted (`400`). A symlink is deleted as the link; its target is never touched. |
 | POST | `/v1/browser/start` | yes | Starts Chromium on first use. `503` when `DC_BROWSER_START=off`. |
 | POST | `/v1/browser/stop` | yes | Stops Chromium. The next navigation starts it again. |
-| POST | `/v1/browser/evaluate` | yes | Body `{"expression":"…"}` (64 KiB cap). Runs one JS expression, returns `{"value": …}` as raw JSON. |
+| POST | `/v1/browser/evaluate` | yes | Body `{"expression":"…"}` (64 KiB cap). Runs one JS expression (promises are awaited) and returns its own JSON value: `{"value": 2}` for `1+1`; `undefined` and values with no JSON form are `null`. A thrown exception is `502` with its message. |
 | POST | `/v1/browser/act` | yes | One high-level action: `{"kind":"click"\|"type"\|"select"\|"scroll"\|"key", "selector":"…", …}`. Click/type/scroll take a `selector` (centre of the first match) or `x`/`y` coordinates. Unknown selector → `404 {"error":"selector not found"}`. Success → `204`. |
 | GET | `/v1/browser/text` | no | The page's visible text. |
 | GET | `/v1/browser/state` | no | The page's real `url`, `title`, `can_back`, `can_forward`, `seq`. |

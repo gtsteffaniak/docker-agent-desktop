@@ -1,12 +1,12 @@
 # Sessions
 
-At most one live session may drive the computer at a time. This is the contract the agent side (today: quantum-bots; tomorrow: any MCP client) implements against. The session is a lease on the whole computer, not on one app: while an agent holds it, the user can still watch — and take over from — the desktop, but no second agent can drive it.
+At most one live session may drive the computer at a time. This is the contract the agent side (any HTTP or MCP client) implements against. The session is a lease on the whole computer, not on one app: while an agent holds it, the user can still watch — and take over from — the desktop, but no second agent can drive it.
 
 ## Acquiring
 
 ```
 POST /v1/session/acquire
-{"holder": {"kind": "agent", "name": "qb-run-42", "run_id": "run-42"}, "ttl_ms": 90000}
+{"holder": {"kind": "agent", "name": "agent-run-42", "run_id": "run-42"}, "ttl_ms": 90000}
 ```
 
 - `holder.kind` is `agent` or `user`; `holder.name` is required and is what a waiting caller sees. Agents should put a run id in both `name` (or `run_id`) so a human can tell who is driving.
@@ -15,10 +15,10 @@ POST /v1/session/acquire
 - When a session is already held, acquire returns `409` with the holder, so the caller knows who to wait for:
 
 ```json
-{"error": "session held by qb-run-42", "holder": {"kind": "agent", "name": "qb-run-42"}, "session_id": "ses_…", "expires_at": "…"}
+{"error": "session held by agent-run-42", "holder": {"kind": "agent", "name": "agent-run-42"}, "expires_at": "…", "paused": false}
 ```
 
-There is no queue and no force-take on this side. A caller that needs the computer waits and retries, or the user takes over from the desktop (see below).
+The `409` never includes the holder's session id: the id is what authorizes mutating calls, so only the caller that acquired the session knows it. There is no queue and no force-take on this side. A caller that needs the computer waits and retries, or the user takes over from the desktop (see below).
 
 ## Keepalive
 
@@ -27,7 +27,7 @@ POST /v1/session/keepalive
 {"session_id": "ses_…"}
 ```
 
-Extends the lease by its TTL and returns the updated session. The holder is expected to keepalive well inside the TTL — quantum-bots does it every 15 s against a 90 s lease, so several missed check-ins are tolerated before the session is treated as abandoned. A keepalive for an unknown, expired, or someone else's session is `409`. A session that is not kept alive expires on its own: a reaper closes stale sessions every 5 s, and every session read expires one lazily, so a dead agent never holds the computer forever. Expiry is recorded as a `session.expired` activity event.
+Extends the lease by its TTL and returns the updated session. The holder is expected to keepalive well inside the TTL — a keepalive every 15 s against the default 90 s lease, so several missed check-ins are tolerated before the session is treated as abandoned. A keepalive for an unknown, expired, or someone else's session is `409`. A session that is not kept alive expires on its own: a reaper closes stale sessions every 5 s, and every session read expires one lazily, so a dead agent never holds the computer forever. Expiry is recorded as a `session.expired` activity event.
 
 ## Acting
 
@@ -76,4 +76,4 @@ An in-memory ring (cap 500, oldest drops first) of what happened on the computer
 ## What is NOT here
 
 - `/healthz` is container liveness only (bare `200`). It is not session health and is intentionally untouched. Real session health is `GET /v1/health` (see [api.md](api.md)).
-- There is no server-side queue, no priority, and no force-take. If the quantum-bots side wants a wait-your-turn UX, it builds the waiting there, on top of the `409` + holder body and `GET /v1/session`.
+- There is no server-side queue, no priority, and no force-take. If a client wants a wait-your-turn UX, it builds the waiting there, on top of the `409` + holder body and `GET /v1/session`.

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# End-to-end checks: health, auth, the web desktop, the app registry, per-app Broadway pages,
-# and the browser window's screencast, navigation state and history.
+# End-to-end checks against the real image (real Chromium and broadwayd, no fakes): health, auth,
+# the web desktop, the app registry, per-app Broadway pages, the browser window's screencast,
+# navigation state and history, network exposure, and then the full /v1 API and MCP server
+# (scripts/e2e_v1.py).
 set -euo pipefail
 
 IMAGE="${DC_IMAGE:-docker-computer:dev}"
@@ -16,6 +18,7 @@ fail() { echo "FAIL: $*" >&2; $DOCKER logs "$NAME" 2>&1 | tail -n 50 >&2 || true
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
   -e COMPUTER_AGENT_TOKEN="$TOKEN" \
   -e DC_BROWSER_START=boot \
+  -e DC_BROWSER_HOME=about:blank \
   -e DESKTOP_WIDTH=1280 \
   -e DESKTOP_HEIGHT=800 \
   "$IMAGE" >/dev/null
@@ -82,7 +85,13 @@ done
 echo OK
 
 echo "== cdp screencast =="
-curl -sf -m 30 "${H[@]}" "$BASE/api/browser/frame" -o "$WORKDIR/browser.jpg" || fail "browser frame"
+# Chromium boots in the background: the frame route is 503 until its screencast is attached.
+ok=0
+for _ in $(seq 1 120); do
+  if curl -sf -m 30 "${H[@]}" "$BASE/api/browser/frame" -o "$WORKDIR/browser.jpg"; then ok=1; break; fi
+  sleep 0.25
+done
+[[ $ok == 1 ]] || fail "browser frame"
 python3 -I - "$WORKDIR/browser.jpg" <<'PY' || fail "browser frame is not a JPEG"
 import sys
 d = open(sys.argv[1], 'rb').read()
@@ -159,5 +168,22 @@ echo OK
 echo "== gtk app and broadway display processes running =="
 $DOCKER exec "$NAME" sh -c 'pgrep -x lxterminal >/dev/null && pgrep -x broadwayd >/dev/null' || fail "terminal or broadwayd not running"
 echo OK
+
+echo "== network exposure: only the agent port is reachable from other containers =="
+# Broadway has no authentication, so every broadwayd must listen on loopback only. Probe the
+# container's address from a second container on the same network.
+ip=$($DOCKER inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
+[[ -n "$ip" ]] || fail "no container IP"
+probe() { $DOCKER run --rm --entrypoint curl "$IMAGE" -s -o /dev/null -m 3 -w '%{http_code}' "http://$ip:$1/$2" || true; }
+code=$(probe 8080 healthz)
+[[ "$code" == 200 ]] || fail "agent port 8080 should be reachable from the network, got '$code'"
+for port in 8081 8082 8083; do
+  code=$(probe "$port" "")
+  [[ "$code" == 000 ]] || fail "broadwayd port $port is reachable from the network (HTTP $code)"
+done
+echo OK
+
+echo "== v1 api and MCP (real Chromium + broadwayd) =="
+python3 -I "$(dirname "$0")/e2e_v1.py" "$BASE" "$TOKEN" "$NAME" "$DOCKER" || fail "v1/MCP e2e"
 
 echo "E2E passed"
