@@ -42,7 +42,7 @@ See [image.md](image.md) for the stages, build arguments, the runtime user, root
 
 ## CI
 
-`lint`, `image`, and `e2e` run on every push to `main` and on pull requests. `publish` also runs on every push to `main` (in parallel; it does not wait on the other workflows). Configure branch protection to require **lint**, **image**, and **e2e** on PRs.
+`lint`, `image`, and `e2e` run on every push to `main` and on pull requests. `publish` also runs on every push to `main` (in parallel; it does not wait on the other workflows). All jobs use the GitHub-hosted **`ubuntu-24.04-arm`** runner (native arm64). Configure branch protection to require **lint**, **image**, and **e2e** on PRs.
 
 | Workflow | File | What it does |
 |----------|------|--------------|
