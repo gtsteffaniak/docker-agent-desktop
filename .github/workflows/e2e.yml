@@ -1,0 +1,68 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  playwright:
+    name: playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DAD_TOKEN: e2e-playwright-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Install e2e dependencies
+        run: npm ci
+        working-directory: tests/e2e
+      - name: Typecheck the suite
+        run: npm run typecheck
+        working-directory: tests/e2e
+      - name: Install Playwright Chromium (+ system deps)
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      - name: Put Playwright's Chromium on PATH as `chromium`
+        # dad launches its own browser by looking up `chromium` on PATH; the
+        # Playwright install is the only Chromium on the runner, so symlink it.
+        run: |
+          CHROME="$(find "$HOME/.cache/ms-playwright" -path '*/chrome-linux*/chrome' -type f 2>/dev/null | head -n 1)"
+          test -n "$CHROME" || (echo "no Playwright chromium found"; exit 1)
+          mkdir -p "$RUNNER_TEMP/chrombin" "$RUNNER_TEMP/dad-home"
+          ln -sf "$CHROME" "$RUNNER_TEMP/chrombin/chromium"
+          echo "$RUNNER_TEMP/chrombin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/chrombin/chromium" --version
+      - name: Build dad for the suite
+        run: go build -o "${{ runner.temp }}/dad" ./cmd/dad
+      - name: Playwright e2e
+        run: npx playwright test
+        working-directory: tests/e2e
+        env:
+          DAD_BIN: ${{ runner.temp }}/dad
+          DAD_TEST_HOME: ${{ runner.temp }}/dad-home
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7

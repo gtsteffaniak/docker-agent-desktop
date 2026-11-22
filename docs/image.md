@@ -35,6 +35,16 @@ make gate        # rebuild and run every check
 Commit the Dockerfile change on its own so the base bump is easy to review and revert. A plain
 rebuild without `bump-base` is still current: the upgrade step pulls the archive's latest packages.
 
+## Pull
+
+Pushes to `main` publish:
+
+```bash
+docker pull ghcr.io/gtsteffaniak/docker-agent-desktop:latest
+```
+
+Tags: `latest`, the branch name (`main`), and `sha-<full git sha>`. Each tag is a multi-arch manifest (`linux/amd64` and `linux/arm64`). The image is public when the GitHub package is public.
+
 ## Build
 
 ```bash

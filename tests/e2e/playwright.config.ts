@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 // The dad server runs on the runner (no Docker): Playwright's webServer starts
 // `go run ./cmd/dad` from the repo root and waits for /healthz. The server needs
 // a Chromium binary on PATH as `chromium` — the CI job symlinks Playwright's own
-// Chromium there before the tests run (see .github/workflows/ci.yml). Locally,
+// Chromium there before the tests run (see .github/workflows/e2e.yml). Locally,
 // run `npm run install-browsers` once and symlink it the same way, or start a
 // server yourself and set DAD_BASE_URL (reuseExistingServer is on outside CI).
 const PORT = Number(process.env.DAD_PORT ?? 8080);
