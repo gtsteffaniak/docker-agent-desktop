@@ -1,12 +1,12 @@
 # MCP server
 
-`dc-agent` exposes the same computer surface as an MCP server at `POST /mcp`, so an agent host (any MCP client) can drive the computer without speaking raw HTTP. The MCP tools call the same service methods the `/v1` HTTP handlers call — never HTTP to self — so the two surfaces cannot drift apart.
+`dad` exposes the same computer surface as an MCP server at `POST /mcp`, so an agent host (any MCP client) can drive the computer without speaking raw HTTP. The MCP tools call the same service methods the `/v1` HTTP handlers call — never HTTP to self — so the two surfaces cannot drift apart.
 
 ## Transport
 
-- **Endpoint:** `POST /mcp`, behind the same token auth as the rest of the API (`X-Computer-Token` header). `GET /mcp` returns `405`.
+- **Endpoint:** `POST /mcp`, behind the same token auth as the rest of the API (`X-Dad-Token` header). `GET /mcp` returns `405`.
 - **Protocol:** Streamable HTTP, stateless mode, plain JSON-RPC responses (no SSE, no `Mcp-Session-Id` dance). Each POST is an independent request: `initialize`, then `tools/list` / `tools/call` as usual.
-- **Server:** name `docker-computer`, version `1` (matching `/v1/meta`'s `api_version`).
+- **Server:** name `docker-agent-desktop`, version `1` (matching `/v1/meta`'s `api_version`).
 - **Library:** the official Go SDK, `github.com/modelcontextprotocol/go-sdk v1.8.0`.
 - **Errors:** tool failures are `isError` tool results (not protocol errors), with the same message text as the HTTP errors (`no session held`, `session held by <name>`, `session paused`, `selector not found`, …).
 
@@ -75,7 +75,7 @@ def rpc(method, params=None, id=1):
     req = urllib.request.Request(BASE + "/mcp", data=body, headers={
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "X-Computer-Token": TOKEN,
+        "X-Dad-Token": TOKEN,
     })
     return json.load(urllib.request.urlopen(req))
 

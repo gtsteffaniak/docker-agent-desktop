@@ -2,7 +2,7 @@
 //
 // The default backend is github.com/gtsteffaniak/go-logger. Its public API does not expose
 // a slog.Handler, so handler.go adapts its Logger interface to slog.Handler. Set
-// DC_LOG_BACKEND=slog to use the standard library handlers directly.
+// DAD_LOG_BACKEND=slog to use the standard library handlers directly.
 package logging
 
 import (
@@ -24,13 +24,13 @@ type Config struct {
 	Output  io.Writer // defaults to os.Stdout
 }
 
-// FromEnv reads DC_LOG_BACKEND, DC_LOG_LEVEL, DC_LOG_JSON and DC_LOG_NO_COLOR.
+// FromEnv reads DAD_LOG_BACKEND, DAD_LOG_LEVEL, DAD_LOG_JSON and DAD_LOG_NO_COLOR.
 func FromEnv() Config {
 	return Config{
-		Backend: envOr("DC_LOG_BACKEND", "gologger"),
-		Level:   envOr("DC_LOG_LEVEL", "info"),
-		JSON:    os.Getenv("DC_LOG_JSON") == "1",
-		NoColor: os.Getenv("DC_LOG_NO_COLOR") == "1",
+		Backend: envOr("DAD_LOG_BACKEND", "gologger"),
+		Level:   envOr("DAD_LOG_LEVEL", "info"),
+		JSON:    os.Getenv("DAD_LOG_JSON") == "1",
+		NoColor: os.Getenv("DAD_LOG_NO_COLOR") == "1",
 	}
 }
 

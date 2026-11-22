@@ -1,4 +1,4 @@
-/docker-computer:dev
+/docker-agent-desktop:dev
 *.png
 *.jpg
 /tmp/.build/

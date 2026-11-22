@@ -1,0 +1,6 @@
+#!/bin/sh
+# Drive and record the container's live Chromium with Playwright (connectOverCDP).
+# See /usr/local/lib/dad-playwright/dad-playwright.js and docs/playwright.md.
+# A 1 MB young generation keeps the recorder's resident memory ~18 MB lower; it is low-throughput
+# work, so the extra minor GCs do not matter.
+exec node --max-semi-space-size=1 /usr/local/lib/dad-playwright/dad-playwright.js "$@"

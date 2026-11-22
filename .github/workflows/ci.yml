@@ -32,12 +32,12 @@ jobs:
       - name: Hadolint
         run: docker run --rm -v "$PWD":/src:ro -w /src ghcr.io/hadolint/hadolint hadolint --config /src/.hadolint.yaml docker/Dockerfile
       - name: Build image
-        run: DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-computer:ci .
+        run: DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-agent-desktop:ci .
       - name: End-to-end
-        run: DC_IMAGE=docker-computer:ci DOCKER=docker ./scripts/e2e.sh
+        run: DAD_IMAGE=docker-agent-desktop:ci DOCKER=docker ./scripts/e2e.sh
         env:
-          COMPUTER_AGENT_TOKEN: ci-token
+          DAD_TOKEN: ci-token
       - name: Dive (image efficiency gate)
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$PWD/.dive-ci:/.dive-ci:ro" wagoodman/dive:latest docker-computer:ci --ci
+            -v "$PWD/.dive-ci:/.dive-ci:ro" wagoodman/dive:latest docker-agent-desktop:ci --ci

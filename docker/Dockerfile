@@ -1,16 +1,16 @@
 # syntax=docker/dockerfile:1.7
 #
-# docker-computer runtime image: a web desktop with GTK 3 apps, a headless browser and the agent.
+# docker-agent-desktop runtime image: a web desktop with GTK 3 apps, a headless browser and the agent.
 #
 # Stages (only the runtime stage is shipped):
-#   agent    Go binary for dc-agent. Module and build caches are BuildKit cache mounts.
-#   module   The GTK keyboard module (libdc-windows.so), built against the runtime's GTK.
+#   agent    Go binary for dad. Module and build caches are BuildKit cache mounts.
+#   module   The GTK keyboard module (libdad-windows.so), built against the runtime's GTK.
 #   playwright  playwright-core from docker/playwright/package-lock.json (npm ci, no browsers).
 #   proot    PRoot built from a pinned upstream release (Debian's 5.1.0 cannot handle statx).
 #   rootfs   Debian trixie with the apps, Chromium and Node, upgraded to the current archive.
 #   runtime  FROM scratch: the rootfs copied in as one layer, then the agent and config.
 #
-# Build:    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-computer:dev .
+# Build:    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-agent-desktop:dev .
 # Options:  --build-arg WITH_SSH_CLIENT=false   leave out the OpenSSH client
 #           --build-arg WITH_EMOJI_FONT=1        add colour emoji (fonts-noto-color-emoji, off by default)
 #
@@ -18,7 +18,7 @@
 # re-resolves debian:trixie-slim and rewrites the pin (see docs/image.md). The rootfs stage runs
 # apt-get upgrade, so security fixes newer than the pinned base still land on every rebuild.
 #
-# Runtime: the image runs as the unprivileged user "bot" (uid 1000). dc-apt installs Debian packages
+# Runtime: the image runs as the unprivileged user "bot" (uid 1000). dad-apt installs Debian packages
 # without root into /home/bot (proot tier, persists with a home volume); for system-wide installs,
 # run as root (docker run --user root, or docker exec -u root) and use apt-get, or build a derived
 # image. Build-time package lists are not supported.
@@ -32,10 +32,10 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 COPY internal ./internal
-COPY cmd/dc-agent ./cmd/dc-agent
+COPY cmd/dad ./cmd/dad
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/dc-agent ./cmd/dc-agent
+    go build -trimpath -ldflags="-s -w" -o /out/dad ./cmd/dad
 
 FROM ${DEBIAN_IMAGE} AS module
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
@@ -45,12 +45,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     DEBIAN_FRONTEND=noninteractive apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     gcc libc6-dev libgtk-3-dev pkg-config
-COPY cmd/dc-windows/module.c /src/module.c
+COPY cmd/dad-windows/module.c /src/module.c
 # hadolint ignore=SC2046
-RUN cc -O2 -Wall -Wno-deprecated-declarations -shared -fPIC -o /src/libdc-windows.so \
+RUN cc -O2 -Wall -Wno-deprecated-declarations -shared -fPIC -o /src/libdad-windows.so \
     /src/module.c $(pkg-config --cflags --libs gtk+-3.0)
 
-# playwright-core only: the client library. Playwright's browser downloads are skipped; dc-playwright
+# playwright-core only: the client library. Playwright's browser downloads are skipped; dad-playwright
 # attaches to the image's own Chromium over CDP. npm stays in this stage and is not shipped.
 FROM ${DEBIAN_IMAGE} AS playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -59,13 +59,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
  && DEBIAN_FRONTEND=noninteractive apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates npm
-WORKDIR /opt/dc-playwright
+WORKDIR /opt/dad-playwright
 COPY docker/playwright/package.json docker/playwright/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && test ! -e node_modules/playwright-core/.local-browsers
 
-# PRoot for dc-apt, the rootless package tier. Debian trixie ships proot 5.1.0, which predates statx
+# PRoot for dad-apt, the rootless package tier. Debian trixie ships proot 5.1.0, which predates statx
 # support: glibc's stat() then misses every bound path, so `ls` of an installed package directory
 # fails. v5.5.0 handles it. The source tarball is pinned by commit and sha256.
 FROM ${DEBIAN_IMAGE} AS proot
@@ -90,7 +90,7 @@ FROM ${DEBIAN_IMAGE} AS rootfs
 ARG WITH_SSH_CLIENT=true
 # Colour emoji font, ~10 MB. Off by default; 1 or true installs it.
 ARG WITH_EMOJI_FONT=false
-COPY docker/dpkg-excludes.cfg /etc/dpkg/dpkg.cfg.d/50-computer
+COPY docker/dpkg-excludes.cfg /etc/dpkg/dpkg.cfg.d/50-dad
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 # The GPU stack is excluded at unpack time by docker/dpkg-excludes.cfg, so it is never written.
@@ -111,7 +111,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log /var/cache/debconf/*-old; \
     groupadd -g 1000 bot; \
     useradd -m -u 1000 -g 1000 -s /bin/bash bot
-COPY --from=playwright /opt/dc-playwright/node_modules /usr/local/lib/dc-playwright/node_modules
+COPY --from=playwright /opt/dad-playwright/node_modules /usr/local/lib/dad-playwright/node_modules
 COPY --from=proot /src/src/proot /usr/local/bin/proot
 
 # The shipped image starts from scratch so the base layer and the apt layer are one layer: files the
@@ -122,29 +122,29 @@ FROM scratch AS runtime
 # hadolint ignore=DL3067
 COPY --from=rootfs / /
 
-COPY --from=agent /out/dc-agent /usr/local/bin/dc-agent
-COPY --from=module /src/libdc-windows.so /usr/local/lib/gtk-3.0/3.0.0/modules/libdc-windows.so
-COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright \
-     docker/rootfs/usr/local/bin/dc-apt /usr/local/bin/
-COPY docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js /usr/local/lib/dc-playwright/dc-playwright.js
-COPY docker/rootfs/etc/dc/apps.d/ /etc/dc/apps.d/
+COPY --from=agent /out/dad /usr/local/bin/dad
+COPY --from=module /src/libdad-windows.so /usr/local/lib/gtk-3.0/3.0.0/modules/libdad-windows.so
+COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dad-playwright \
+     docker/rootfs/usr/local/bin/dad-apt /usr/local/bin/
+COPY docker/rootfs/usr/local/lib/dad-playwright/dad-playwright.js /usr/local/lib/dad-playwright/dad-playwright.js
+COPY docker/rootfs/etc/dad/apps.d/ /etc/dad/apps.d/
 
-LABEL org.opencontainers.image.title="docker-computer" \
+LABEL org.opencontainers.image.title="docker-agent-desktop" \
       org.opencontainers.image.description="Web desktop with GTK 3 apps, a headless browser and an agent API" \
       org.opencontainers.image.licenses="MIT" \
-      io.docker-computer.api-version="1"
+      io.docker-agent-desktop.api-version="1"
 
 USER 1000:1000
 WORKDIR /home/bot
-# No default token: the container refuses to start without COMPUTER_AGENT_TOKEN.
-# FROM scratch carries no ENV from the base, so PATH is set here. ~/.local/bin comes first: dc-apt
+# No default token: the container refuses to start without DAD_TOKEN.
+# FROM scratch carries no ENV from the base, so PATH is set here. ~/.local/bin comes first: dad-apt
 # puts its command wrappers there.
 ENV PATH=/home/bot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GTK_PATH=/usr/local/lib/gtk-3.0 \
-    GTK_MODULES=dc-windows \
-    NODE_PATH=/usr/local/lib/dc-playwright/node_modules \
+    GTK_MODULES=dad-windows \
+    NODE_PATH=/usr/local/lib/dad-playwright/node_modules \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    DC_CDP_URL=http://127.0.0.1:9222
+    DAD_CDP_URL=http://127.0.0.1:9222
 
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=2s --start-period=8s --retries=6 \

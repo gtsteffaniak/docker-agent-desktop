@@ -1,7 +1,7 @@
 {
-  "name": "dc-playwright",
+  "name": "dad-playwright",
   "private": true,
-  "description": "Playwright client used by dc-playwright to drive and record the container's live Chromium over CDP. No browsers are downloaded.",
+  "description": "Playwright client used by dad-playwright to drive and record the container's live Chromium over CDP. No browsers are downloaded.",
   "license": "MIT",
   "dependencies": {
     "playwright-core": "1.65.1"

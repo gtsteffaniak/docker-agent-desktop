@@ -1,6 +1,8 @@
-# docker-computer
+# docker-agent-desktop
 
-A containerized desktop environment designed for agentic workflows and bots. Native GTK apps and a Chromium browser that agents drive, record and replay with Playwright. A small Go agent (`dc-agent`) exposes an HTTP API for apps, input, screenshots and browser frames. Viewable from a lightweight browser.
+> Formerly `docker-computer`, with the agent formerly `dc-agent`. See [Renamed names](docs/configuration.md#renamed-from-docker-computer).
+
+A containerized desktop environment designed for agentic workflows and bots. Native GTK apps and a Chromium browser that agents drive, record and replay with Playwright. A small Go agent, `dad` (short for docker-agent-desktop), exposes an HTTP API for apps, input, screenshots and browser frames. Viewable from a lightweight browser.
 
 [Documentation](docs/) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Desktop](docs/desktop.md) · [Image](docs/image.md) · [Playwright](docs/playwright.md) · [Portal](docs/portal.md) · [Development](docs/development.md)
 
@@ -11,7 +13,7 @@ A containerized desktop environment designed for agentic workflows and bots. Nat
 | Desktop | A web desktop with a floating dock, rounded window frames and a gradient wallpaper. GTK 3 apps and the browser run inside it |
 | Customization | Apps from `apps.d` files (`port` for GTK apps) and the desktop CSS |
 | Browser | Headless Chromium, with frames streamed over CDP |
-| Playwright | `dc-playwright` attaches to that same Chromium over CDP to drive it, record actions and a trace into `~/recordings`, and replay recordings |
+| Playwright | `dad-playwright` attaches to that same Chromium over CDP to drive it, record actions and a trace into `~/recordings`, and replay recordings |
 | Input | Pointer clicks and text typed through the API |
 | Portal | The desktop in any browser at `/desktop/` |
 | Agent | Versioned HTTP API, token auth, request and lifecycle logs |
@@ -36,10 +38,10 @@ Press Ctrl-C to stop. Run `make help` for every target.
 For a production-style run, set your own token and publish the port as you need:
 
 ```bash
-docker run --rm -p 8080:8080 -e COMPUTER_AGENT_TOKEN=change-me docker-computer:dev
+docker run --rm -p 8080:8080 -e DAD_TOKEN=change-me docker-agent-desktop:dev
 ```
 
-The container refuses to start without `COMPUTER_AGENT_TOKEN`.
+The container refuses to start without `DAD_TOKEN`.
 
 ## Documentation
 

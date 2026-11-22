@@ -41,9 +41,9 @@ def req(method, path, body=None, sid=None, token=TOKEN, headers=None, raw=None, 
     """One HTTP call. Returns (status, headers, body bytes); never raises on HTTP errors."""
     hdrs = dict(headers or {})
     if token is not None:
-        hdrs["X-Computer-Token"] = token
+        hdrs["X-Dad-Token"] = token
     if sid is not None:
-        hdrs["X-Dc-Session"] = sid
+        hdrs["X-Dad-Session"] = sid
     data = raw
     if body is not None:
         data = json.dumps(body).encode()
@@ -426,20 +426,20 @@ def test_playwright(sid):
     jreq("POST", "/v1/browser/navigate", {"url": "http://127.0.0.1:8765/"}, sid=sid)
     wait_for(lambda: evaluate(sid, "document.title") == "pw form", "form page in the live browser", timeout=10)
 
-    # Same browser, same page: a value set through dc-agent's own CDP connection is visible to a
-    # Playwright script, and dc-playwright marks the page the window shows as live.
-    evaluate(sid, "window.__dcMark = 'mark-' + 42; true")
-    pages = [json.loads(ln) for ln in sh(sid, "dc-playwright pages")["stdout"].splitlines() if ln.startswith("{")]
+    # Same browser, same page: a value set through dad's own CDP connection is visible to a
+    # Playwright script, and dad-playwright marks the page the window shows as live.
+    evaluate(sid, "window.__dadMark = 'mark-' + 42; true")
+    pages = [json.loads(ln) for ln in sh(sid, "dad-playwright pages")["stdout"].splitlines() if ln.startswith("{")]
     live = [p for p in pages if p["live"]]
     check(len(live) == 1 and live[0]["url"] == "http://127.0.0.1:8765/", f"live page: {pages}")
     jreq("POST", "/v1/files/write", {"path": "pw-mark.js", "content":
-         "module.exports = async ({ page }) => { const m = await page.evaluate(() => window.__dcMark);"
+         "module.exports = async ({ page }) => { const m = await page.evaluate(() => window.__dadMark);"
          " if (m !== 'mark-42') throw new Error('not the live page: ' + m); };"}, sid=sid)
-    r = last_json(sh(sid, "dc-playwright run pw-mark.js")["stdout"])
+    r = last_json(sh(sid, "dad-playwright run pw-mark.js")["stdout"])
     check(r["ok"] is True, f"mark script: {r}")
 
-    # Record while the user (here: dc-agent's input API, the same path as the browser window) acts.
-    rec = jreq("POST", "/v1/shell/exec", {"command": "dc-playwright record --name e2e-flow",
+    # Record while the user (here: dad's input API, the same path as the browser window) acts.
+    rec = jreq("POST", "/v1/shell/exec", {"command": "dad-playwright record --name e2e-flow",
                                           "background": True, "timeout_ms": 300000}, sid=sid)
     job = rec["job_id"]
     started = wait_for(lambda: (lambda j: j if '"recording"' in j["stdout"] or j["status"] != "running" else None)(
@@ -458,7 +458,7 @@ def test_playwright(sid):
         out = sh(sid, "cat recordings/e2e-flow/script.js", want_rc=None)["stdout"]
         return out if "'Go'" in out and ".click()" in out else None
     wait_for(script_has_click, "recorded click on Go in script.js", timeout=10)
-    stop = last_json(sh(sid, "dc-playwright stop e2e-flow")["stdout"])
+    stop = last_json(sh(sid, "dad-playwright stop e2e-flow")["stdout"])
     check(stop["status"] == "complete" and stop["actions"] >= 2, f"stop: {stop}")
     j = wait_for(lambda: (lambda x: x if x["status"] != "running" else None)(jreq("GET", f"/v1/shell/jobs/{job}")),
                  "recorder exit", timeout=30)
@@ -481,10 +481,10 @@ def test_playwright(sid):
     check(not sh(sid, "test -e recordings/e2e-flow/recorder.pid && echo stale", want_rc=None)["stdout"].strip(),
           "recorder.pid left behind")
 
-    # Replay on the live page from a blank state, traced, and check the result through dc-agent.
+    # Replay on the live page from a blank state, traced, and check the result through dad.
     jreq("POST", "/v1/browser/navigate", {"url": "about:blank"}, sid=sid)
     wait_for(lambda: jreq("GET", "/v1/browser/state")["url"] == "about:blank", "reset to about:blank", timeout=10)
-    r = last_json(sh(sid, "dc-playwright replay recordings/e2e-flow --trace recordings/e2e-flow/replay-trace.zip")["stdout"])
+    r = last_json(sh(sid, "dad-playwright replay recordings/e2e-flow --trace recordings/e2e-flow/replay-trace.zip")["stdout"])
     check(r["ok"] is True, f"replay: {r}")
     wait_for(lambda: jreq("GET", "/v1/browser/state")["url"].endswith("/done.html#Ada"), "replay to reach done page", timeout=10)
     check(evaluate(sid, "document.getElementById('out').textContent") == "Ada", "replayed page content")
@@ -493,12 +493,12 @@ def test_playwright(sid):
     # A failing script fails the replay (non-zero, ok=false) instead of hanging.
     jreq("POST", "/v1/files/write", {"path": "pw-bad.js", "content":
          "module.exports = async ({ page }) => { await page.click('#does-not-exist'); };"}, sid=sid)
-    r = sh(sid, "dc-playwright run pw-bad.js --timeout 1500", want_rc=1)
+    r = sh(sid, "dad-playwright run pw-bad.js --timeout 1500", want_rc=1)
     check(last_json(r["stdout"])["ok"] is False, f"bad script: {r}")
-    sh(sid, "dc-playwright stop", want_rc=1)  # nothing running
-    sh(sid, "dc-playwright record --name ../escape --duration 1", want_rc=2)
+    sh(sid, "dad-playwright stop", want_rc=1)  # nothing running
+    sh(sid, "dad-playwright record --name ../escape --duration 1", want_rc=2)
 
-    # Attaching never started another browser or downloaded one, and dc-agent still streams.
+    # Attaching never started another browser or downloaded one, and dad still streams.
     check(chromium_browsers() == browsers_before, f"Chromium browser process changed: {browsers_before} -> {chromium_browsers()}")
     check(not sh(sid, "ls -d ~/.cache/ms-playwright 2>/dev/null", want_rc=None)["stdout"].strip(), "Playwright browsers downloaded")
     code, _, img = req("GET", "/api/browser/frame?format=png")
@@ -509,9 +509,9 @@ def test_playwright(sid):
 
 def test_package_tier(sid):
     section("rootless package tier through the shell API")
-    r = sh(sid, "dc-apt install jq >/dev/null && jq -cn '{via:\"api\"}' && command -v jq", timeout_ms=180000)
-    check(r["stdout"].split() == ['{"via":"api"}', "/home/bot/.local/bin/jq"], f"dc-apt via shell API: {r}")
-    sh(sid, "dc-apt remove jq libjq1 libonig5 >/dev/null && ! command -v jq")
+    r = sh(sid, "dad-apt install jq >/dev/null && jq -cn '{via:\"api\"}' && command -v jq", timeout_ms=180000)
+    check(r["stdout"].split() == ['{"via":"api"}', "/home/bot/.local/bin/jq"], f"dad-apt via shell API: {r}")
+    sh(sid, "dad-apt remove jq libjq1 libonig5 >/dev/null && ! command -v jq")
 
 # ---------------------------------------------------------------- health
 def test_health(sid):
@@ -652,7 +652,7 @@ def test_mcp():
     code, _, _ = req("GET", "/mcp")
     check(code == 405, f"GET /mcp = {code}")
     code, out = mcp(init)
-    check(code == 200 and out["result"]["serverInfo"]["name"] == "docker-computer", f"initialize = {out}")
+    check(code == 200 and out["result"]["serverInfo"]["name"] == "docker-agent-desktop", f"initialize = {out}")
 
     code, out = mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     names = {t["name"] for t in out["result"]["tools"]}

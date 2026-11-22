@@ -1,4 +1,4 @@
-module github.com/gtsteffaniak/docker-computer
+module github.com/gtsteffaniak/docker-agent-desktop
 
 go 1.27
 

@@ -11,7 +11,7 @@ Run `make help` for the full list.
 | `make unit` | `go test -race ./...` |
 | `make lint` | `gofmt`, `go vet`, `shellcheck` and `node --check` when installed (a finding fails the target), and hadolint |
 | `make hadolint` | Lint `docker/Dockerfile` |
-| `make build` | Build `docker-computer:dev` |
+| `make build` | Build `docker-agent-desktop:dev` |
 | `make e2e` | Run `scripts/e2e.sh` against the image |
 | `make budgets` | Measure image size (bytes, MB, MiB), memory in MiB (idle, browser open, browser while recording) and boot time |
 | `make bump-base` | Re-pin `DEBIAN_IMAGE` to the current `debian:trixie-slim` digest |
@@ -34,9 +34,9 @@ See [image.md](image.md) for the stages, build arguments, the runtime user, root
 - `internal/apps`: registry parsing, directory overrides, invalid entries.
 - `internal/background`: gradient parsing and rendering, rejection of unsafe input.
 - `internal/broadway`: also covers click encoding, surface hit-testing, configure confirmation, and decoding after a resize.
-- `cmd/dc-agent`: desktop routes and assets, the token cookie exchange, per-app proxying with the keys script, the app registry, browser URL normalization and history state.
+- `cmd/dad`: desktop routes and assets, the token cookie exchange, per-app proxying with the keys script, the app registry, browser URL normalization and history state.
 - `internal/cdp`: navigation history, main-frame filtering, key and mouse mapping.
-- `scripts/e2e.sh`: runs the real container. It covers health, auth, the desktop page with its cookie, the app registry and ports, each GTK app page, CDP frames, browser navigation and the address state, the URL guard, network exposure, the `/v1` API and MCP (`scripts/e2e_v1.py`), Playwright attached to the live browser (record, trace, replay), and the `dc-apt` tier persisting across containers on a home volume.
+- `scripts/e2e.sh`: runs the real container. It covers health, auth, the desktop page with its cookie, the app registry and ports, each GTK app page, CDP frames, browser navigation and the address state, the URL guard, network exposure, the `/v1` API and MCP (`scripts/e2e_v1.py`), Playwright attached to the live browser (record, trace, replay), and the `dad-apt` tier persisting across containers on a home volume.
 
 ## CI
 

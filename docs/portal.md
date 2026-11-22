@@ -1,16 +1,16 @@
 # Web desktop access
 
-The desktop is served by `dc-agent` on the same port as the API, so only one port needs publishing.
+The desktop is served by `dad` on the same port as the API, so only one port needs publishing.
 
 ## Open it
 
 `make dev` prints the URL. Or open:
 
 ```
-http://localhost:8080/desktop/?token=<COMPUTER_AGENT_TOKEN>
+http://localhost:8080/desktop/?token=<DAD_TOKEN>
 ```
 
-The first visit exchanges the token for an `HttpOnly`, `SameSite=Strict` cookie (`dc_token`, 12 hours) and redirects without the token in the address bar. Later requests use the cookie. `/portal/` is kept as an alias that redirects to `/desktop/`.
+The first visit exchanges the token for an `HttpOnly`, `SameSite=Strict` cookie (`dad_token`, 12 hours) and redirects without the token in the address bar. Later requests use the cookie. `/portal/` is kept as an alias that redirects to `/desktop/`.
 
 ## Routes
 

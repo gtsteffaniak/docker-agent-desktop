@@ -5,21 +5,21 @@
 # (scripts/e2e_v1.py).
 set -euo pipefail
 
-IMAGE="${DC_IMAGE:-docker-computer:dev}"
-TOKEN="${COMPUTER_AGENT_TOKEN:-e2e-token}"
-NAME="dc-e2e-$$"
+IMAGE="${DAD_IMAGE:-docker-agent-desktop:dev}"
+TOKEN="${DAD_TOKEN:-e2e-token}"
+NAME="dad-e2e-$$"
 DOCKER="${DOCKER:-docker}"
 WORKDIR=$(mktemp -d)
-HOMEVOL="dc-e2e-home-$$"
+HOMEVOL="dad-e2e-home-$$"
 trap 'rm -rf "$WORKDIR"; $DOCKER rm -f "$NAME" "$NAME-tier" >/dev/null 2>&1 || true; $DOCKER volume rm -f "$HOMEVOL" >/dev/null 2>&1 || true' EXIT
 
 fail() { echo "FAIL: $*" >&2; $DOCKER logs "$NAME" 2>&1 | tail -n 50 >&2 || true; exit 1; }
 
 # Port 0 lets Docker pick a free host port on loopback only.
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
-  -e COMPUTER_AGENT_TOKEN="$TOKEN" \
-  -e DC_BROWSER_START=boot \
-  -e DC_BROWSER_HOME=about:blank \
+  -e DAD_TOKEN="$TOKEN" \
+  -e DAD_BROWSER_START=boot \
+  -e DAD_BROWSER_HOME=about:blank \
   -e DESKTOP_WIDTH=1280 \
   -e DESKTOP_HEIGHT=800 \
   "$IMAGE" >/dev/null
@@ -27,7 +27,7 @@ $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
 hostport=$($DOCKER port "$NAME" 8080 | head -n 1 | awk -F: '{print $NF}')
 [[ -n "$hostport" ]] || fail "could not determine published port"
 BASE="http://127.0.0.1:${hostport}"
-H=(-H "X-Computer-Token: $TOKEN")
+H=(-H "X-Dad-Token: $TOKEN")
 
 echo "== wait healthz =="
 healthy=0
@@ -41,7 +41,12 @@ echo OK
 echo "== auth =="
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/apps")
 [[ "$code" == 401 ]] || fail "unauthenticated request returned $code, want 401"
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Computer-Token: wrong" "$BASE/api/apps")
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Dad-Token: wrong" "$BASE/api/apps")
+[[ "$code" == 401 ]] || fail "wrong token returned $code, want 401"
+# Deprecated pre-rename header still authenticates.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Computer-Token: $TOKEN" "$BASE/api/apps")
+[[ "$code" == 200 ]] || fail "legacy X-Computer-Token returned $code, want 200"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Dad-Token: wrong" "$BASE/api/apps")
 [[ "$code" == 401 ]] || fail "wrong token returned $code, want 401"
 echo OK
 
@@ -133,7 +138,7 @@ SID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
   -d '{"holder":{"kind":"agent","name":"e2e"}}' "$BASE/v1/session/acquire" \
   | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[ -n "$SID" ]] || fail "session acquire returned no id"
-S=(-H "X-Dc-Session: $SID")
+S=(-H "X-Dad-Session: $SID")
 curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"command":"echo e2e-ok"}' \
   "$BASE/v1/shell/exec" | grep -q 'e2e-ok' || fail "shell exec did not echo"
 curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
@@ -187,14 +192,14 @@ echo OK
 echo "== v1 api and MCP (real Chromium + broadwayd) =="
 python3 -I "$(dirname "$0")/e2e_v1.py" "$BASE" "$TOKEN" "$NAME" "$DOCKER" || fail "v1/MCP e2e"
 
-echo "== rootless package tier: dc-apt installs as uid 1000 into a home volume, and it persists =="
+echo "== rootless package tier: dad-apt installs as uid 1000 into a home volume, and it persists =="
 # tier_run: a fresh container (the real entrypoint and agent) with the home volume mounted, then a
 # command as the default user. Each call removes the previous container, so the second call proves
 # the install survived in the volume alone.
 tier_run() {
   $DOCKER rm -f "$NAME-tier" >/dev/null 2>&1 || true
   $DOCKER run -d --name "$NAME-tier" -v "$HOMEVOL:/home/bot" \
-    -e COMPUTER_AGENT_TOKEN="$TOKEN" -e DC_BROWSER_START=off -e DC_AUTOSTART_APPS=0 "$IMAGE" >/dev/null
+    -e DAD_TOKEN="$TOKEN" -e DAD_BROWSER_START=off -e DAD_AUTOSTART_APPS=0 "$IMAGE" >/dev/null
   $DOCKER exec "$NAME-tier" bash -c "$1"
 }
 # shellcheck disable=SC2016 # expands inside the container
@@ -202,22 +207,22 @@ tier_run '
   set -eux
   [ "$(id -u)" = 1000 ]
   ! command -v jq && ! command -v figlet
-  dc-apt install jq figlet
+  dad-apt install jq figlet
   [ "$(jq -cn "{tier:1}")" = "{\"tier\":1}" ]       # library (libjq/libonig) bound in
   figlet hi | grep -q "|_|"                            # data dir /usr/share/figlet + alternative
-  dc-apt exec ls /usr/share/figlet | grep -q standard.flf
+  dad-apt exec ls /usr/share/figlet | grep -q standard.flf
   [ ! -e /usr/bin/jq ] && [ ! -e /usr/share/figlet ]   # the image itself is untouched
-' >"$WORKDIR/tier1.log" 2>&1 || { cat "$WORKDIR/tier1.log" >&2; fail "dc-apt install as uid 1000"; }
+' >"$WORKDIR/tier1.log" 2>&1 || { cat "$WORKDIR/tier1.log" >&2; fail "dad-apt install as uid 1000"; }
 # shellcheck disable=SC2016 # expands inside the container
 tier_run '
   set -eux
-  dc-apt list | grep -q "^jq"
+  dad-apt list | grep -q "^jq"
   [ "$(jq -cn "{persisted:true}")" = "{\"persisted\":true}" ]
   figlet ok | grep -q "|"
-  dc-apt remove figlet
+  dad-apt remove figlet
   ! command -v figlet
   jq --version
-' >"$WORKDIR/tier2.log" 2>&1 || { cat "$WORKDIR/tier2.log" >&2; fail "dc-apt packages did not persist in the home volume"; }
+' >"$WORKDIR/tier2.log" 2>&1 || { cat "$WORKDIR/tier2.log" >&2; fail "dad-apt packages did not persist in the home volume"; }
 $DOCKER rm -f "$NAME-tier" >/dev/null
 echo OK
 

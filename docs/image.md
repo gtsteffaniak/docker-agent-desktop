@@ -4,7 +4,7 @@ The image is built from `docker/Dockerfile`. It has six stages. Only the runtime
 
 | Stage | What it does | Shipped |
 |-------|--------------|---------|
-| `agent` | Builds `dc-agent` with Go. Module and build caches are BuildKit cache mounts. | the binary only |
+| `agent` | Builds `dad` with Go. Module and build caches are BuildKit cache mounts. | the binary only |
 | `module` | Builds the GTK keyboard module against the runtime's GTK. | the `.so` only |
 | `playwright` | `npm ci` of `playwright-core` from `docker/playwright/package-lock.json`, with browser downloads skipped. | `node_modules` only (npm is not shipped) |
 | `proot` | Builds PRoot v5.5.0 from a pinned upstream commit (sha256-checked). Debian's proot 5.1.0 lacks `statx`, so `stat()` of bound paths fails. | the binary only |
@@ -38,7 +38,7 @@ rebuild without `bump-base` is still current: the upgrade step pulls the archive
 ## Build
 
 ```bash
-DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-computer:dev .
+DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-agent-desktop:dev .
 ```
 
 Build arguments:
@@ -49,36 +49,36 @@ Build arguments:
 | `WITH_EMOJI_FONT` | `false` | Install `fonts-noto-color-emoji` (about 11 MB), so Chromium and the GTK apps draw colour emoji. Off by default: without it emoji render as empty boxes or monochrome fallbacks. `1` or `true` turns it on; any other value leaves it out. |
 
 There is no build-time list of extra packages. Install software at runtime instead: without root
-with `dc-apt` (below), or as root.
+with `dad-apt` (below), or as root.
 
 ## Runtime user
 
 The image runs as `bot` (uid 1000) by default. In that mode:
 
 - Apps, Chromium and the agent run as `bot`.
-- `apt-get install` and writes to system paths fail. Use `dc-apt` for user-level packages.
+- `apt-get install` and writes to system paths fail. Use `dad-apt` for user-level packages.
 - The home directory `/home/bot` is writable. `~/.local/bin` is first on `PATH`.
 
-## Installing software without root (dc-apt)
+## Installing software without root (dad-apt)
 
-`dc-apt` installs Debian packages as `bot`, under `/home/bot`, so they persist with a home volume
-(`-v dc-home:/home/bot`) across container restarts and image upgrades.
+`dad-apt` installs Debian packages as `bot`, under `/home/bot`, so they persist with a home volume
+(`-v dad-home:/home/bot`) across container restarts and image upgrades.
 
 ```bash
-dc-apt install jq figlet      # resolves against the image, downloads only what is missing
+dad-apt install jq figlet      # resolves against the image, downloads only what is missing
 jq --version                  # wrappers in ~/.local/bin run each installed command
-dc-apt list                   # package and version
-dc-apt exec ls /usr/share/figlet   # any command, with installed files at their real paths
-dc-apt shell                  # bash with the installed files visible
-dc-apt remove figlet
+dad-apt list                   # package and version
+dad-apt exec ls /usr/share/figlet   # any command, with installed files at their real paths
+dad-apt shell                  # bash with the installed files visible
+dad-apt remove figlet
 ```
 
 How it works:
 
 1. `apt-get` runs as `bot` in download-only mode, with its package lists and archive cache under
-   `~/.local/share/dc-apt`. It resolves against the image's dpkg database, so dependencies the
+   `~/.local/share/dad-apt`. It resolves against the image's dpkg database, so dependencies the
    image already has are not downloaded.
-2. Each `.deb` is unpacked with `dpkg-deb` into `~/.local/share/dc-apt/root` (docs and man pages are
+2. Each `.deb` is unpacked with `dpkg-deb` into `~/.local/share/dad-apt/root` (docs and man pages are
    skipped). `update-alternatives --install` links from the package's postinst (for example
    `/usr/bin/figlet`) are recreated in the tier.
 3. Commands run under [PRoot](https://proot-me.github.io/), which binds each installed file or new
@@ -102,17 +102,17 @@ Run the container as root to install packages with apt. The desktop still starts
 
 ```bash
 # Start a root shell in a running container
-docker exec -u root -it dc-dev bash
+docker exec -u root -it dad-dev bash
 apt-get update && apt-get install -y --no-install-recommends jq
 
 # Or run the container as root from the start
-docker run --user root ... docker-computer:dev
+docker run --user root ... docker-agent-desktop:dev
 ```
 
 Packages installed this way live in the container's writable layer. They are lost when the container is removed. To keep them, build a derived image:
 
 ```dockerfile
-FROM docker-computer:dev
+FROM docker-agent-desktop:dev
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
@@ -124,10 +124,10 @@ USER 1000:1000
 With `WITH_SSH_CLIENT=true` the image has `ssh`, `scp` and `ssh-keygen`. The image does not run an SSH server. Mount keys and known hosts into the home directory, with the permissions ssh requires:
 
 ```bash
-docker run -v dc-ssh:/home/bot/.ssh ... docker-computer:dev
+docker run -v dad-ssh:/home/bot/.ssh ... docker-agent-desktop:dev
 ```
 
-Put keys in the `dc-ssh` volume, owned by uid 1000 with mode 600 for private keys. Do not mount the host's `~/.ssh` read-write unless you accept that the container can read and change it.
+Put keys in the `dad-ssh` volume, owned by uid 1000 with mode 600 for private keys. Do not mount the host's `~/.ssh` read-write unless you accept that the container can read and change it.
 
 ## Size and efficiency
 
@@ -147,10 +147,10 @@ Node.js and `playwright-core` add about 79 MB (Debian's `nodejs` 20 with `libnod
 Removed on purpose: the Mesa GPU drivers, LLVM, z3, the Vulkan layers and the software Vulkan
 rasteriser (headless Chromium runs with `--disable-gpu`); man pages and documentation (copyright
 files stay); the colour emoji font unless `WITH_EMOJI_FONT` is set; npm (build stage only); and
-Playwright's own browsers (never downloaded; `dc-playwright` uses the image's Chromium).
+Playwright's own browsers (never downloaded; `dad-playwright` uses the image's Chromium).
 
 Memory (container cgroup usage, MiB): idle about 6 MiB; Chromium plus the GTK apps about 260 MiB
-(budget 400); while `dc-playwright record` runs, about 80 MiB more (the Node process), released
+(budget 400); while `dad-playwright record` runs, about 80 MiB more (the Node process), released
 when the recording stops. Boot to healthy: about 0.25 s.
 
 ## Gates

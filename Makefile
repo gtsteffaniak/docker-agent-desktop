@@ -1,7 +1,7 @@
-IMAGE ?= docker-computer:dev
+IMAGE ?= docker-agent-desktop:dev
 # Use sudo only when the current user cannot reach the Docker daemon.
 DOCKER ?= $(shell docker info >/dev/null 2>&1 && echo docker || echo "sudo docker")
-DEV_NAME ?= dc-dev
+DEV_NAME ?= dad-dev
 DEV_PORT ?= 8080
 DEV_TOKEN ?= dev-token
 
@@ -20,12 +20,12 @@ lint: hadolint ## gofmt, go vet, shellcheck, node --check and hadolint
 	@test -z "$$(gofmt -l . | grep -v '^$$')" || (echo "gofmt needed"; gofmt -l .; exit 1)
 	go vet ./...
 	@if command -v shellcheck >/dev/null; then \
-	  shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright \
-	    docker/rootfs/usr/local/bin/dc-apt; \
+	  shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dad-playwright \
+	    docker/rootfs/usr/local/bin/dad-apt; \
 	else echo "shellcheck not installed: skipped"; fi
 	@if command -v node >/dev/null; then \
-	  node --check docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js; \
-	else echo "node not installed: dc-playwright.js syntax check skipped"; fi
+	  node --check docker/rootfs/usr/local/lib/dad-playwright/dad-playwright.js; \
+	else echo "node not installed: dad-playwright.js syntax check skipped"; fi
 
 hadolint: ## Lint the Dockerfile
 	$(HADOLINT) docker/Dockerfile
@@ -40,10 +40,10 @@ build: ## Build the container image
 	$(DOCKER) build -f docker/Dockerfile -t $(IMAGE) .
 
 e2e: ## Run the end-to-end script against the image
-	DC_IMAGE=$(IMAGE) ./scripts/e2e.sh
+	DAD_IMAGE=$(IMAGE) ./scripts/e2e.sh
 
 budgets: ## Measure size, memory and boot time against budgets
-	DC_IMAGE=$(IMAGE) ./scripts/budgets.sh
+	DAD_IMAGE=$(IMAGE) ./scripts/budgets.sh
 
 dive: ## Image efficiency gate: fails when wasted space or efficiency breaks .dive-ci
 	$(DIVE) --ci $(IMAGE)
@@ -61,7 +61,7 @@ dev: build dev-stop ## Build, run the container, and print the desktop URL
 	@echo ""
 	$(DOCKER) run --rm --name $(DEV_NAME) \
 	  -p 127.0.0.1:$(DEV_PORT):8080 \
-	  -e COMPUTER_AGENT_TOKEN=$(DEV_TOKEN) \
+	  -e DAD_TOKEN=$(DEV_TOKEN) \
 	  $(IMAGE)
 
 dev-stop: ## Stop the dev container if it is running
