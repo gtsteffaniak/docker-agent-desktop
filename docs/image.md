@@ -44,6 +44,7 @@ Build arguments:
 | Argument | Default | Purpose |
 |----------|---------|---------|
 | `WITH_SSH_CLIENT` | `true` | Install `openssh-client`, so the container can ssh out to other machines. `false` leaves it out. |
+| `WITH_EMOJI_FONT` | `false` | Install `fonts-noto-color-emoji` (about 11 MB), so Chromium and the GTK apps draw colour emoji. Off by default: without it emoji render as empty boxes or monochrome fallbacks. `1` or `true` turns it on; any other value leaves it out. |
 
 There is no build-time list of extra packages. Install software at runtime as root instead (below).
 

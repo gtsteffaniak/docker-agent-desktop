@@ -10,6 +10,7 @@
 #
 # Build:    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-computer:dev .
 # Options:  --build-arg WITH_SSH_CLIENT=false   leave out the OpenSSH client
+#           --build-arg WITH_EMOJI_FONT=1        add colour emoji (fonts-noto-color-emoji, off by default)
 #
 # Base image: DEBIAN_IMAGE is pinned by digest so builds are reproducible. `make bump-base`
 # re-resolves debian:trixie-slim and rewrites the pin (see docs/image.md). The rootfs stage runs
@@ -48,6 +49,8 @@ RUN cc -O2 -Wall -Wno-deprecated-declarations -shared -fPIC -o /src/libdc-window
 
 FROM ${DEBIAN_IMAGE} AS rootfs
 ARG WITH_SSH_CLIENT=true
+# Colour emoji font, ~10 MB. Off by default; 1 or true installs it.
+ARG WITH_EMOJI_FONT=false
 COPY docker/dpkg-excludes.cfg /etc/dpkg/dpkg.cfg.d/50-computer
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
@@ -60,8 +63,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     set -eux; \
     pkgs="ca-certificates curl tini dbus-x11 libgtk-3-bin hicolor-icon-theme librsvg2-common \
-          lxterminal mousepad thunar chromium fonts-liberation fonts-noto-color-emoji"; \
+          lxterminal mousepad thunar chromium fonts-liberation"; \
     if [ "$WITH_SSH_CLIENT" = "true" ]; then pkgs="$pkgs openssh-client"; fi; \
+    case "$WITH_EMOJI_FONT" in 1|true) pkgs="$pkgs fonts-noto-color-emoji" ;; esac; \
     DEBIAN_FRONTEND=noninteractive apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs; \
