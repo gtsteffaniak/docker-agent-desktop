@@ -20,7 +20,8 @@ lint: hadolint ## gofmt, go vet, shellcheck, node --check and hadolint
 	@test -z "$$(gofmt -l . | grep -v '^$$')" || (echo "gofmt needed"; gofmt -l .; exit 1)
 	go vet ./...
 	@if command -v shellcheck >/dev/null; then \
-	  shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright; \
+	  shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright \
+	    docker/rootfs/usr/local/bin/dc-apt; \
 	else echo "shellcheck not installed: skipped"; fi
 	@if command -v node >/dev/null; then \
 	  node --check docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js; \

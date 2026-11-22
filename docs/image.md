@@ -1,12 +1,13 @@
 # Image
 
-The image is built from `docker/Dockerfile`. It has five stages. Only the runtime stage ships:
+The image is built from `docker/Dockerfile`. It has six stages. Only the runtime stage ships:
 
 | Stage | What it does | Shipped |
 |-------|--------------|---------|
 | `agent` | Builds `dc-agent` with Go. Module and build caches are BuildKit cache mounts. | the binary only |
 | `module` | Builds the GTK keyboard module against the runtime's GTK. | the `.so` only |
 | `playwright` | `npm ci` of `playwright-core` from `docker/playwright/package-lock.json`, with browser downloads skipped. | `node_modules` only (npm is not shipped) |
+| `proot` | Builds PRoot v5.5.0 from a pinned upstream commit (sha256-checked). Debian's proot 5.1.0 lacks `statx`, so `stat()` of bound paths fails. | the binary only |
 | `rootfs` | Debian trixie upgraded to the current archive, with the desktop apps, Chromium and Node.js. | its filesystem, flattened |
 | `runtime` | `FROM scratch`: the `rootfs` filesystem as one layer, then the agent, module and config. | yes |
 
@@ -47,15 +48,53 @@ Build arguments:
 | `WITH_SSH_CLIENT` | `true` | Install `openssh-client`, so the container can ssh out to other machines. `false` leaves it out. |
 | `WITH_EMOJI_FONT` | `false` | Install `fonts-noto-color-emoji` (about 11 MB), so Chromium and the GTK apps draw colour emoji. Off by default: without it emoji render as empty boxes or monochrome fallbacks. `1` or `true` turns it on; any other value leaves it out. |
 
-There is no build-time list of extra packages. Install software at runtime as root instead (below).
+There is no build-time list of extra packages. Install software at runtime instead: without root
+with `dc-apt` (below), or as root.
 
 ## Runtime user
 
 The image runs as `bot` (uid 1000) by default. In that mode:
 
 - Apps, Chromium and the agent run as `bot`.
-- `apt-get` and writes to system paths fail. This is intended. Software is not installed by the unprivileged user.
-- The home directory `/home/bot` is writable. Put user tools in `~/.local/bin` or in a volume.
+- `apt-get install` and writes to system paths fail. Use `dc-apt` for user-level packages.
+- The home directory `/home/bot` is writable. `~/.local/bin` is first on `PATH`.
+
+## Installing software without root (dc-apt)
+
+`dc-apt` installs Debian packages as `bot`, under `/home/bot`, so they persist with a home volume
+(`-v dc-home:/home/bot`) across container restarts and image upgrades.
+
+```bash
+dc-apt install jq figlet      # resolves against the image, downloads only what is missing
+jq --version                  # wrappers in ~/.local/bin run each installed command
+dc-apt list                   # package and version
+dc-apt exec ls /usr/share/figlet   # any command, with installed files at their real paths
+dc-apt shell                  # bash with the installed files visible
+dc-apt remove figlet
+```
+
+How it works:
+
+1. `apt-get` runs as `bot` in download-only mode, with its package lists and archive cache under
+   `~/.local/share/dc-apt`. It resolves against the image's dpkg database, so dependencies the
+   image already has are not downloaded.
+2. Each `.deb` is unpacked with `dpkg-deb` into `~/.local/share/dc-apt/root` (docs and man pages are
+   skipped). `update-alternatives --install` links from the package's postinst (for example
+   `/usr/bin/figlet`) are recreated in the tier.
+3. Commands run under [PRoot](https://proot-me.github.io/), which binds each installed file or new
+   directory over its real path (`/usr/bin/jq`, `/usr/lib/x86_64-linux-gnu/libjq.so.1`,
+   `/usr/share/figlet`) for that process only. Programs find libraries and data where Debian put
+   them; the image's files are never changed; everything else is the real system.
+
+Limits:
+
+- Maintainer scripts are not run. Packages that need them (services, system users, setuid helpers,
+  triggers, debconf questions) do not fully work.
+- No real root: no setuid, no binding privileged ports, no writes to system paths.
+- PRoot uses ptrace (with seccomp acceleration). Startup adds a few milliseconds per command;
+  syscall-heavy work is slower than native.
+- Removing a package does not check whether another tier package depends on it.
+- The tier needs network access to `deb.debian.org` (or the sources in `/etc/apt/sources.list.d`).
 
 ## Installing software as root
 

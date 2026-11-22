@@ -6,6 +6,7 @@
 #   agent    Go binary for dc-agent. Module and build caches are BuildKit cache mounts.
 #   module   The GTK keyboard module (libdc-windows.so), built against the runtime's GTK.
 #   playwright  playwright-core from docker/playwright/package-lock.json (npm ci, no browsers).
+#   proot    PRoot built from a pinned upstream release (Debian's 5.1.0 cannot handle statx).
 #   rootfs   Debian trixie with the apps, Chromium and Node, upgraded to the current archive.
 #   runtime  FROM scratch: the rootfs copied in as one layer, then the agent and config.
 #
@@ -17,9 +18,10 @@
 # re-resolves debian:trixie-slim and rewrites the pin (see docs/image.md). The rootfs stage runs
 # apt-get upgrade, so security fixes newer than the pinned base still land on every rebuild.
 #
-# Runtime: the image runs as the unprivileged user "bot" (uid 1000) and apps are not installed
-# there. To install software, run as root (docker run --user root, or docker exec -u root) and use
-# apt-get. Build-time package lists are not supported.
+# Runtime: the image runs as the unprivileged user "bot" (uid 1000). dc-apt installs Debian packages
+# without root into /home/bot (proot tier, persists with a home volume); for system-wide installs,
+# run as root (docker run --user root, or docker exec -u root) and use apt-get, or build a derived
+# image. Build-time package lists are not supported.
 
 ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
@@ -63,6 +65,27 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && test ! -e node_modules/playwright-core/.local-browsers
 
+# PRoot for dc-apt, the rootless package tier. Debian trixie ships proot 5.1.0, which predates statx
+# support: glibc's stat() then misses every bound path, so `ls` of an installed package directory
+# fails. v5.5.0 handles it. The source tarball is pinned by commit and sha256.
+FROM ${DEBIAN_IMAGE} AS proot
+ARG PROOT_COMMIT=25dc6a3134891f98a79f57ce1c2c1b23ff15cad1
+ARG PROOT_SHA256=6adb0d808dad47d66f503d6d5a699b455ac1a0a519b905378be4ffc0af92f40e
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl gcc libc6-dev libtalloc-dev make pkg-config
+WORKDIR /src
+RUN curl -fsSL -o proot.tar.gz "https://github.com/proot-me/proot/archive/${PROOT_COMMIT}.tar.gz" \
+ && echo "${PROOT_SHA256}  proot.tar.gz" | sha256sum -c - \
+ && tar -xzf proot.tar.gz --strip-components=1 \
+ && make -C src proot \
+ && strip src/proot \
+ && src/proot --version | grep -q 'process_vm = yes, seccomp_filter = yes'
+
 FROM ${DEBIAN_IMAGE} AS rootfs
 ARG WITH_SSH_CLIENT=true
 # Colour emoji font, ~10 MB. Off by default; 1 or true installs it.
@@ -79,7 +102,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     set -eux; \
     pkgs="ca-certificates curl tini dbus-x11 libgtk-3-bin hicolor-icon-theme librsvg2-common \
-          lxterminal mousepad thunar chromium fonts-liberation nodejs"; \
+          lxterminal mousepad thunar chromium fonts-liberation nodejs libtalloc2"; \
     if [ "$WITH_SSH_CLIENT" = "true" ]; then pkgs="$pkgs openssh-client"; fi; \
     case "$WITH_EMOJI_FONT" in 1|true) pkgs="$pkgs fonts-noto-color-emoji" ;; esac; \
     DEBIAN_FRONTEND=noninteractive apt-get update; \
@@ -89,6 +112,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     groupadd -g 1000 bot; \
     useradd -m -u 1000 -g 1000 -s /bin/bash bot
 COPY --from=playwright /opt/dc-playwright/node_modules /usr/local/lib/dc-playwright/node_modules
+COPY --from=proot /src/src/proot /usr/local/bin/proot
 
 # The shipped image starts from scratch so the base layer and the apt layer are one layer: files the
 # upgrade replaced exist once, not twice (dive no longer reports the base's libssl/libcrypto as
@@ -100,7 +124,8 @@ COPY --from=rootfs / /
 
 COPY --from=agent /out/dc-agent /usr/local/bin/dc-agent
 COPY --from=module /src/libdc-windows.so /usr/local/lib/gtk-3.0/3.0.0/modules/libdc-windows.so
-COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright /usr/local/bin/
+COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright \
+     docker/rootfs/usr/local/bin/dc-apt /usr/local/bin/
 COPY docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js /usr/local/lib/dc-playwright/dc-playwright.js
 COPY docker/rootfs/etc/dc/apps.d/ /etc/dc/apps.d/
 
@@ -112,8 +137,9 @@ LABEL org.opencontainers.image.title="docker-computer" \
 USER 1000:1000
 WORKDIR /home/bot
 # No default token: the container refuses to start without COMPUTER_AGENT_TOKEN.
-# FROM scratch carries no ENV from the base, so PATH is set here.
-ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+# FROM scratch carries no ENV from the base, so PATH is set here. ~/.local/bin comes first: dc-apt
+# puts its command wrappers there.
+ENV PATH=/home/bot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GTK_PATH=/usr/local/lib/gtk-3.0 \
     GTK_MODULES=dc-windows \
     NODE_PATH=/usr/local/lib/dc-playwright/node_modules \

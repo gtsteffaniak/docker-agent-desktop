@@ -506,6 +506,13 @@ def test_playwright(sid):
     check(health()["status"] == "ok", f"health after Playwright: {health()}")
     jreq("POST", f"/v1/shell/jobs/{srv['job_id']}/kill", sid=sid)
 
+
+def test_package_tier(sid):
+    section("rootless package tier through the shell API")
+    r = sh(sid, "dc-apt install jq >/dev/null && jq -cn '{via:\"api\"}' && command -v jq", timeout_ms=180000)
+    check(r["stdout"].split() == ['{"via":"api"}', "/home/bot/.local/bin/jq"], f"dc-apt via shell API: {r}")
+    sh(sid, "dc-apt remove jq libjq1 libonig5 >/dev/null && ! command -v jq")
+
 # ---------------------------------------------------------------- health
 def test_health(sid):
     section("health ok / degraded / recovery")
@@ -731,6 +738,7 @@ def main():
     test_files(sid)
     test_browser(sid)
     test_playwright(sid)
+    test_package_tier(sid)
     test_display(sid)
     test_apps(sid)
     test_health(sid)
