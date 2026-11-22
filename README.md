@@ -1,8 +1,6 @@
 # docker-agent-desktop
 
-> Formerly `docker-computer`, with the agent formerly `dc-agent`. See [Renamed names](docs/configuration.md#renamed-from-docker-computer).
-
-A containerized desktop environment designed for agentic workflows and bots. Native GTK apps and a Chromium browser that agents drive, record and replay with Playwright. A small Go agent, `dad` (short for docker-agent-desktop), exposes an HTTP API for apps, input, screenshots and browser frames. Viewable from a lightweight browser.
+A containerized desktop environment designed for agentic workflows. Native GTK apps and a Chromium browser that agents drive, record and replay with Playwright. A small Go agent, `dad` (short for docker-agent-desktop), exposes an HTTP API for apps, input, screenshots and browser frames. Viewable from a lightweight browser.
 
 [Documentation](docs/) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Desktop](docs/desktop.md) · [Image](docs/image.md) · [Playwright](docs/playwright.md) · [Portal](docs/portal.md) · [Development](docs/development.md)
 
