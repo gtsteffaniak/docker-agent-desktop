@@ -8,42 +8,219 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR supersedes the older run; pushes to main are
+# never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  go:
+  format:
+    name: gofmt
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
           cache: true
-      - name: Lint
+      - name: gofmt
         run: |
-          test -z "$(gofmt -l . )" || (gofmt -l .; exit 1)
-          go vet ./...
-      - name: Unit tests
-        run: go test -race ./...
-      - name: OpenAPI spec is current
+          test -z "$(gofmt -l .)" || (echo "gofmt needed:"; gofmt -l .; exit 1)
+
+  vet:
+    name: go vet + go.mod tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go.mod is tidy
         run: |
-          go install github.com/swaggo/swag/cmd/swag@v1.16.4
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          swag init --generalInfo main.go --dir ./cmd/dad --output ./cmd/dad/docs --parseDependency --parseInternal
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum || (echo "go.mod/go.sum are not tidy: run 'make tidy' and commit the result"; exit 1)
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.15.0
+          args: --timeout=5m
+
+  test:
+    name: go test (${{ matrix.go-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.27", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: Unit tests with race detector and coverage
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -n 1
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-go-${{ matrix.go-version }}
+          path: coverage.out
+          retention-days: 7
+
+  build:
+    name: go build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - name: Cross-compile the whole module
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build ./...
+
+  swagger:
+    name: OpenAPI spec is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - name: Regenerate the spec
+        run: make swagger
+      - name: Spec must match the committed one
+        run: |
           git diff --exit-code -- cmd/dad/docs/ || (echo "OpenAPI spec is stale: run 'make swagger' and commit the result"; exit 1)
 
-  image:
+  scripts-lint:
+    name: shellcheck + node check
     runs-on: ubuntu-latest
-    needs: go
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dad-playwright \
+            docker/rootfs/usr/local/bin/dad-apt
+      - name: node --check dad-playwright.js
+        run: node --check docker/rootfs/usr/local/lib/dad-playwright/dad-playwright.js
+
+  workflows-lint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        uses: rhysd/actionlint@v1
+
+  image:
+    name: image + docker e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
       - name: Hadolint
         run: docker run --rm -v "$PWD":/src:ro -w /src ghcr.io/hadolint/hadolint hadolint --config /src/.hadolint.yaml docker/Dockerfile
       - name: Build image
         run: DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-agent-desktop:ci .
-      - name: End-to-end
+      - name: End-to-end (docker)
         run: DAD_IMAGE=docker-agent-desktop:ci DOCKER=docker ./scripts/e2e.sh
+        env:
+          DAD_TOKEN: ci-token
+      - name: Budgets
+        run: DAD_IMAGE=docker-agent-desktop:ci DOCKER=docker ./scripts/budgets.sh
         env:
           DAD_TOKEN: ci-token
       - name: Dive (image efficiency gate)
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD/.dive-ci:/.dive-ci:ro" wagoodman/dive:latest docker-agent-desktop:ci --ci
+
+  e2e-playwright:
+    name: playwright e2e (no docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test, build]
+    env:
+      DAD_TOKEN: e2e-playwright-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Install e2e dependencies
+        run: npm ci
+        working-directory: tests/e2e
+      - name: Typecheck the suite
+        run: npm run typecheck
+        working-directory: tests/e2e
+      - name: Install Playwright Chromium (+ system deps)
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      - name: Put Playwright's Chromium on PATH as `chromium`
+        # dad launches its own browser by looking up `chromium` on PATH; the
+        # Playwright install is the only Chromium on the runner, so symlink it.
+        run: |
+          CHROME=""
+          for c in "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux/chrome; do CHROME="$c"; break; done
+          test -n "$CHROME" || (echo "no Playwright chromium found"; exit 1)
+          mkdir -p "$RUNNER_TEMP/chrombin" "$RUNNER_TEMP/dad-home"
+          ln -sf "$CHROME" "$RUNNER_TEMP/chrombin/chromium"
+          echo "$RUNNER_TEMP/chrombin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/chrombin/chromium" --version
+      - name: Compile check (fail fast before the suite starts the server)
+        run: go build ./...
+      - name: Playwright e2e (server runs on the runner, no docker)
+        run: npx playwright test
+        working-directory: tests/e2e
+        env:
+          DAD_TEST_HOME: ${{ runner.temp }}/dad-home
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7

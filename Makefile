@@ -9,7 +9,7 @@ DOCKER_RUN := $(DOCKER) run --rm -v /var/run/docker.sock:/var/run/docker.sock
 DIVE       := $(DOCKER_RUN) -v $(CURDIR)/.dive-ci:/.dive-ci:ro -v $(CURDIR)/.build:/out wagoodman/dive:latest
 HADOLINT   := $(DOCKER) run --rm -v $(CURDIR):/src:ro -w /src ghcr.io/hadolint/hadolint hadolint --config /src/.hadolint.yaml
 
-.PHONY: help gate lint hadolint unit build e2e budgets dive tidy bump-base dev dev-stop dev-logs swagger
+.PHONY: help gate lint hadolint unit build e2e budgets dive tidy bump-base dev dev-stop dev-logs swagger playwright
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -44,6 +44,9 @@ build: ## Build the container image
 
 e2e: ## Run the end-to-end script against the image
 	DAD_IMAGE=$(IMAGE) ./scripts/e2e.sh
+
+playwright: ## Run the Playwright e2e suite (server on the host, no docker; needs `chromium` on PATH)
+	cd tests/e2e && npm ci && npm run typecheck && npx playwright test
 
 budgets: ## Measure size, memory and boot time against budgets
 	DAD_IMAGE=$(IMAGE) ./scripts/budgets.sh
