@@ -13,8 +13,9 @@
 - App quit: `POST /v1/apps/stop` (SIGTERM, 5 s grace, SIGKILL) and `POST /v1/browser/stop`.
 - Broader input: right/middle click, drag, scroll and key combinations on the display; selector-based click/type/select/scroll/key in the browser.
 - MCP server wrapping the same surface at `POST /mcp` (see [mcp.md](mcp.md)).
+- Playwright on the live browser: `dc-playwright` attaches over CDP to drive, record (codegen script + trace) and replay (see [playwright.md](playwright.md)).
 
 ## Planned
 
 1. Resource limits and hardening guide.
-2. Slim the image further once the Node toolchain is needed again.
+2. First-class recording endpoints (`/v1/browser/recording/*` and MCP tools) on top of `dc-playwright`, so agents do not need the shell API to record.

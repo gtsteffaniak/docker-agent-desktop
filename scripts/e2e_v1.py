@@ -378,6 +378,141 @@ def test_browser(sid):
     check(evaluate(sid, "2*21") == 42, "evaluate after restart")
 
 
+# ---------------------------------------------------------------- playwright on the live browser
+PW_FORM = """<!doctype html><title>pw form</title>
+<label>Name <input id=name aria-label="Name"></label>
+<button id=go style="width:200px;height:60px"
+  onclick="location.href='/done.html#'+encodeURIComponent(document.getElementById('name').value)">Go</button>
+"""
+PW_DONE = """<!doctype html><title>pw done</title><h1 id=out></h1>
+<script>document.getElementById('out').textContent=decodeURIComponent(location.hash.slice(1))</script>
+"""
+PW_SERVER = ("require('http').createServer((q,r)=>{const f=q.url.startsWith('/done')?'done.html':'form.html';"
+             "r.setHeader('content-type','text/html');"
+             "require('fs').createReadStream(require('path').join(process.env.HOME,'pw-site',f)).pipe(r)})"
+             ".listen(8765,'127.0.0.1',()=>console.log('serving'))")
+
+
+def chromium_browsers():
+    """PIDs of Chromium browser processes (not renderers/zygotes/utilities)."""
+    out = dexec("ps -eo pid=,args= | awk '$2 ~ /chromium$/ && $0 !~ /--type=/ {print $1}'", check_rc=False)
+    return sorted(out.split())
+
+
+def sh(sid, command, timeout_ms=60000, want_rc=0):
+    r = jreq("POST", "/v1/shell/exec", {"command": command, "timeout_ms": timeout_ms}, sid=sid, timeout=120)
+    if want_rc is not None:
+        check(r["exit_code"] == want_rc, f"{command!r}: exit {r['exit_code']} want {want_rc}\n"
+                                         f"stdout={r['stdout'][-2000:]}\nstderr={r['stderr'][-2000:]}")
+    return r
+
+
+def last_json(text):
+    lines = [ln for ln in text.splitlines() if ln.startswith("{")]
+    check(lines, f"no JSON line in {text!r}")
+    return json.loads(lines[-1])
+
+
+def test_playwright(sid):
+    section("playwright: attach to the live browser, record, trace, replay")
+    jreq("POST", "/v1/files/write", {"path": "pw-site/form.html", "content": PW_FORM}, sid=sid)
+    jreq("POST", "/v1/files/write", {"path": "pw-site/done.html", "content": PW_DONE}, sid=sid)
+    srv = jreq("POST", "/v1/shell/exec", {"command": f"exec node -e {shlex.quote(PW_SERVER)}",
+                                          "background": True, "timeout_ms": 600000}, sid=sid)
+    wait_for(lambda: "serving" in jreq("GET", f"/v1/shell/jobs/{srv['job_id']}")["stdout"], "test site", timeout=15)
+
+    browsers_before = chromium_browsers()
+    check(len(browsers_before) == 1, f"want exactly one Chromium browser process, got {browsers_before}")
+    jreq("POST", "/v1/browser/navigate", {"url": "http://127.0.0.1:8765/"}, sid=sid)
+    wait_for(lambda: evaluate(sid, "document.title") == "pw form", "form page in the live browser", timeout=10)
+
+    # Same browser, same page: a value set through dc-agent's own CDP connection is visible to a
+    # Playwright script, and dc-playwright marks the page the window shows as live.
+    evaluate(sid, "window.__dcMark = 'mark-' + 42; true")
+    pages = [json.loads(ln) for ln in sh(sid, "dc-playwright pages")["stdout"].splitlines() if ln.startswith("{")]
+    live = [p for p in pages if p["live"]]
+    check(len(live) == 1 and live[0]["url"] == "http://127.0.0.1:8765/", f"live page: {pages}")
+    jreq("POST", "/v1/files/write", {"path": "pw-mark.js", "content":
+         "module.exports = async ({ page }) => { const m = await page.evaluate(() => window.__dcMark);"
+         " if (m !== 'mark-42') throw new Error('not the live page: ' + m); };"}, sid=sid)
+    r = last_json(sh(sid, "dc-playwright run pw-mark.js")["stdout"])
+    check(r["ok"] is True, f"mark script: {r}")
+
+    # Record while the user (here: dc-agent's input API, the same path as the browser window) acts.
+    rec = jreq("POST", "/v1/shell/exec", {"command": "dc-playwright record --name e2e-flow",
+                                          "background": True, "timeout_ms": 300000}, sid=sid)
+    job = rec["job_id"]
+    started = wait_for(lambda: (lambda j: j if '"recording"' in j["stdout"] or j["status"] != "running" else None)(
+        jreq("GET", f"/v1/shell/jobs/{job}")), "recorder to start", timeout=30)
+    check(started["status"] == "running", f"recorder exited early: {started}")
+    check(last_json(started["stdout"])["start_url"] == "http://127.0.0.1:8765/", f"start url: {started['stdout']}")
+    code, _, _ = req("POST", "/v1/browser/act", {"kind": "click", "selector": "#name"}, sid=sid)
+    check(code == 204, f"click name = {code}")
+    code, _, _ = req("POST", "/v1/browser/act", {"kind": "type", "selector": "#name", "text": "Ada"}, sid=sid)
+    check(code == 204, f"type name = {code}")
+    code, _, _ = req("POST", "/v1/browser/act", {"kind": "click", "selector": "#go"}, sid=sid)
+    check(code == 204, f"click go = {code}")
+    wait_for(lambda: jreq("GET", "/v1/browser/state")["url"].endswith("/done.html#Ada"), "navigation to done page", timeout=10)
+
+    def script_has_click():
+        out = sh(sid, "cat recordings/e2e-flow/script.js", want_rc=None)["stdout"]
+        return out if "'Go'" in out and ".click()" in out else None
+    wait_for(script_has_click, "recorded click on Go in script.js", timeout=10)
+    stop = last_json(sh(sid, "dc-playwright stop e2e-flow")["stdout"])
+    check(stop["status"] == "complete" and stop["actions"] >= 2, f"stop: {stop}")
+    j = wait_for(lambda: (lambda x: x if x["status"] != "running" else None)(jreq("GET", f"/v1/shell/jobs/{job}")),
+                 "recorder exit", timeout=30)
+    check(j["exit_code"] == 0, f"recorder exit: {j}")
+
+    script = sh(sid, "cat recordings/e2e-flow/script.js")["stdout"]
+    check("await page.goto(\"http://127.0.0.1:8765/\");" in script, f"script should start at the start url:\n{script}")
+    check(".fill('Ada')" in script, f"script should fill the name:\n{script}")
+    check("getByRole('button', { name: 'Go' }).click()" in script, f"script should click Go:\n{script}")
+    meta = json.loads(sh(sid, "cat recordings/e2e-flow/recording.json")["stdout"])
+    check(meta["status"] == "complete" and meta["trace"].endswith("trace.zip"), f"recording.json: {meta}")
+    # The trace is a Playwright trace zip with action events and DOM snapshots of the live session.
+    tr = sh(sid, "f=recordings/e2e-flow/trace.zip; head -c 2 $f; echo; stat -c %s $f; "
+                 "grep -a -c 'trace.trace' $f; grep -a -c 'trace.network' $f")["stdout"].split()
+    check(tr[0] == "PK" and int(tr[1]) > 2000 and int(tr[2]) > 0 and int(tr[3]) > 0, f"trace.zip: {tr}")
+    check(int(sh(sid, "wc -l < recordings/e2e-flow/actions.jsonl")["stdout"]) >= 2, "actions.jsonl")
+    # Recordings hold typed text (passwords too): private to the user.
+    modes = sh(sid, "cd recordings/e2e-flow && stat -c '%a' . script.js actions.jsonl recording.json trace.zip")["stdout"].split()
+    check(modes == ["700", "600", "600", "600", "600"], f"recording permissions: {modes}")
+    check(not sh(sid, "test -e recordings/e2e-flow/recorder.pid && echo stale", want_rc=None)["stdout"].strip(),
+          "recorder.pid left behind")
+
+    # Replay on the live page from a blank state, traced, and check the result through dc-agent.
+    jreq("POST", "/v1/browser/navigate", {"url": "about:blank"}, sid=sid)
+    wait_for(lambda: jreq("GET", "/v1/browser/state")["url"] == "about:blank", "reset to about:blank", timeout=10)
+    r = last_json(sh(sid, "dc-playwright replay recordings/e2e-flow --trace recordings/e2e-flow/replay-trace.zip")["stdout"])
+    check(r["ok"] is True, f"replay: {r}")
+    wait_for(lambda: jreq("GET", "/v1/browser/state")["url"].endswith("/done.html#Ada"), "replay to reach done page", timeout=10)
+    check(evaluate(sid, "document.getElementById('out').textContent") == "Ada", "replayed page content")
+    check(sh(sid, "head -c 2 recordings/e2e-flow/replay-trace.zip")["stdout"] == "PK", "replay trace")
+
+    # A failing script fails the replay (non-zero, ok=false) instead of hanging.
+    jreq("POST", "/v1/files/write", {"path": "pw-bad.js", "content":
+         "module.exports = async ({ page }) => { await page.click('#does-not-exist'); };"}, sid=sid)
+    r = sh(sid, "dc-playwright run pw-bad.js --timeout 1500", want_rc=1)
+    check(last_json(r["stdout"])["ok"] is False, f"bad script: {r}")
+    sh(sid, "dc-playwright stop", want_rc=1)  # nothing running
+    sh(sid, "dc-playwright record --name ../escape --duration 1", want_rc=2)
+
+    # Attaching never started another browser or downloaded one, and dc-agent still streams.
+    check(chromium_browsers() == browsers_before, f"Chromium browser process changed: {browsers_before} -> {chromium_browsers()}")
+    check(not sh(sid, "ls -d ~/.cache/ms-playwright 2>/dev/null", want_rc=None)["stdout"].strip(), "Playwright browsers downloaded")
+    code, _, img = req("GET", "/api/browser/frame?format=png")
+    check(code == 200 and img[:4] == b"\x89PNG", f"browser frame after Playwright = {code}")
+    check(health()["status"] == "ok", f"health after Playwright: {health()}")
+    jreq("POST", f"/v1/shell/jobs/{srv['job_id']}/kill", sid=sid)
+
+
+def test_package_tier(sid):
+    section("rootless package tier through the shell API")
+    r = sh(sid, "dc-apt install jq >/dev/null && jq -cn '{via:\"api\"}' && command -v jq", timeout_ms=180000)
+    check(r["stdout"].split() == ['{"via":"api"}', "/home/bot/.local/bin/jq"], f"dc-apt via shell API: {r}")
+    sh(sid, "dc-apt remove jq libjq1 libonig5 >/dev/null && ! command -v jq")
+
 # ---------------------------------------------------------------- health
 def test_health(sid):
     section("health ok / degraded / recovery")
@@ -602,6 +737,8 @@ def main():
     test_shell(sid)
     test_files(sid)
     test_browser(sid)
+    test_playwright(sid)
+    test_package_tier(sid)
     test_display(sid)
     test_apps(sid)
     test_health(sid)

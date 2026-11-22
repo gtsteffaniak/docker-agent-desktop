@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Measures image size, container memory (idle and browser-open), and boot-to-healthy time.
+# Measures image size, container memory (idle, browser-open, and browser-open while dc-playwright
+# records), and boot-to-healthy time.
+#
+# Units: image size is reported in bytes, MB (10^6) and MiB (2^20). Memory is the container's cgroup
+# usage from docker stats, in MiB; the memory budgets are MiB.
 set -euo pipefail
 
 IMAGE="${DC_IMAGE:-docker-computer:dev}"
@@ -7,8 +11,8 @@ TOKEN="${COMPUTER_AGENT_TOKEN:-budget-token}"
 NAME="dc-budget-$$"
 DOCKER="${DOCKER:-docker}"
 
-idle_budget_mb=60
-browser_budget_mb=400
+idle_budget_mib=60
+browser_budget_mib=400
 boot_budget_s=3
 
 # shellcheck disable=SC2317 # invoked by the EXIT trap
@@ -45,9 +49,9 @@ print(int(n * mult))
 '
 }
 
+# docker image inspect .Size is the uncompressed size of all layers on this daemon (overlay2).
 image_bytes=$($DOCKER image inspect "$IMAGE" --format='{{.Size}}')
-image_mb=$((image_bytes / 1024 / 1024))
-echo "MEASURED image_size_mb=$image_mb"
+echo "MEASURED image_size_bytes=$image_bytes image_size_MB=$((image_bytes / 1000000)) image_size_MiB=$((image_bytes / 1048576)) (uncompressed)"
 
 # Boot-to-healthy, idle (no browser, no apps).
 start=$(now_ms)
@@ -61,8 +65,8 @@ boot_s=$(python3 -I -c "print(f'{($(now_ms) - $start) / 1000:.3f}')")
 echo "MEASURED boot_to_healthy_s=$boot_s"
 
 sleep 3
-idle_mb=$(mem_mib "$NAME")
-echo "MEASURED idle_rss_mb=$idle_mb"
+idle_mib=$(mem_mib "$NAME")
+echo "MEASURED idle_mem_MiB=$idle_mib"
 
 # Browser open: Chromium plus the GTK apps, with a frame received.
 $DOCKER rm -f "$NAME" >/dev/null
@@ -80,15 +84,27 @@ for _ in $(seq 1 100); do
   sleep 0.15
 done
 sleep 2
-browser_mb=$(mem_mib "$NAME")
-echo "MEASURED browser_open_rss_mb=$browser_mb"
+browser_mib=$(mem_mib "$NAME")
+echo "MEASURED browser_open_mem_MiB=$browser_mib"
+
+# Same container while dc-playwright records the live browser (Node + playwright-core attached over
+# CDP, tracing on). Informational: recording is on demand, so it has no budget of its own.
+$DOCKER exec -d "$NAME" dc-playwright record --name budget
+for _ in $(seq 1 100); do
+  $DOCKER exec "$NAME" test -e /home/bot/recordings/budget/recorder.pid && break
+  sleep 0.1
+done
+sleep 2
+recording_mib=$(mem_mib "$NAME")
+echo "MEASURED browser_recording_mem_MiB=$recording_mib"
+$DOCKER exec "$NAME" dc-playwright stop budget >/dev/null || { echo "FAIL dc-playwright stop"; exit 1; }
 
 fail=0
-if (( idle_mb > idle_budget_mb )); then
-  echo "FAIL idle ${idle_mb}MB > ${idle_budget_mb}MB"; fail=1
+if (( idle_mib > idle_budget_mib )); then
+  echo "FAIL idle ${idle_mib}MiB > ${idle_budget_mib}MiB"; fail=1
 fi
-if (( browser_mb > browser_budget_mb )); then
-  echo "FAIL browser ${browser_mb}MB > ${browser_budget_mb}MB"; fail=1
+if (( browser_mib > browser_budget_mib )); then
+  echo "FAIL browser ${browser_mib}MiB > ${browser_budget_mib}MiB"; fail=1
 fi
 if python3 -I -c "import sys; sys.exit(0 if float('$boot_s') <= $boot_budget_s else 1)"; then :; else
   echo "FAIL boot ${boot_s}s > ${boot_budget_s}s"; fail=1
