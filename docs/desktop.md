@@ -1,6 +1,6 @@
 # Desktop
 
-The desktop is a web page served by `dc-agent` at `/desktop/`. It draws the dock, every window frame, and the browser toolbar in CSS and JavaScript. It has no build step and no GTK code of its own.
+The desktop is a web page served by `dad` at `/desktop/`. It draws the dock, every window frame, and the browser toolbar in CSS and JavaScript. It has no build step and no GTK code of its own.
 
 ## Windows
 
@@ -35,7 +35,7 @@ Input is forwarded to the page: mouse, scroll, keys, and Ctrl+V paste. F11, F12 
 
 ## Keyboard
 
-Printable keys reach GTK apps directly. The `dc-windows` module stops GTK from treating plain letters as menubar mnemonics, so typing in an app is not swallowed. Browser-only shortcuts (F11, F12, Ctrl+Shift+I/C/J) are kept out of the forwarded input, so the browser's own dev tools still work.
+Printable keys reach GTK apps directly. The `dad-windows` module stops GTK from treating plain letters as menubar mnemonics, so typing in an app is not swallowed. Browser-only shortcuts (F11, F12, Ctrl+Shift+I/C/J) are kept out of the forwarded input, so the browser's own dev tools still work.
 
 ## Limits
 
@@ -47,9 +47,9 @@ Printable keys reach GTK apps directly. The `dc-windows` module stops GTK from t
 
 ## Development
 
-`DC_DESKTOP_DIR` serves the desktop from a directory instead of the embedded copy, so CSS and JavaScript changes can be tried without rebuilding the image:
+`DAD_DESKTOP_DIR` serves the desktop from a directory instead of the embedded copy, so CSS and JavaScript changes can be tried without rebuilding the image:
 
 ```bash
-docker run --rm -p 8080:8080 -e COMPUTER_AGENT_TOKEN=dev-token \
-  -e DC_DESKTOP_DIR=/desk -v "$PWD/cmd/dc-agent/desktop:/desk:ro" docker-computer:dev
+docker run --rm -p 8080:8080 -e DAD_TOKEN=dev-token \
+  -e DAD_DESKTOP_DIR=/desk -v "$PWD/cmd/dad/desktop:/desk:ro" docker-agent-desktop:dev
 ```

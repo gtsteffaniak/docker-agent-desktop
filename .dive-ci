@@ -1,4 +1,4 @@
-# dive CI rules for docker-computer. dive --ci fails the gate when any rule is broken.
+# dive CI rules for docker-agent-desktop. dive --ci fails the gate when any rule is broken.
 # The runtime stage is FROM scratch with the upgraded rootfs copied in as one layer, so files
 # apt replaced in the Debian base (libssl3t64/libcrypto, zlib1g, ...) are stored once. Measured:
 # 0 bytes wasted, 100% efficiency. 20 MB is headroom for the small layers on top (agent, module,

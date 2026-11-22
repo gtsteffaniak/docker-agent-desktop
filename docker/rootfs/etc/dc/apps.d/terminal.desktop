@@ -1,9 +1,0 @@
-# docker-computer app registry entry. Same [app] layout as Quantum Bots. port is the Broadway port.
-# Override or add apps in ~/.config/dc/apps.d/ (same id replaces this entry).
-[app]
-id = terminal
-name = Terminal
-exec = lxterminal
-icon = lxterminal
-order = 10
-port = 8081

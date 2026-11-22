@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Measures image size, container memory (idle, browser-open, and browser-open while dc-playwright
+# Measures image size, container memory (idle, browser-open, and browser-open while dad-playwright
 # records), and boot-to-healthy time.
 #
 # Units: image size is reported in bytes, MB (10^6) and MiB (2^20). Memory is the container's cgroup
 # usage from docker stats, in MiB; the memory budgets are MiB.
 set -euo pipefail
 
-IMAGE="${DC_IMAGE:-docker-computer:dev}"
-TOKEN="${COMPUTER_AGENT_TOKEN:-budget-token}"
-NAME="dc-budget-$$"
+IMAGE="${DAD_IMAGE:-docker-agent-desktop:dev}"
+TOKEN="${DAD_TOKEN:-budget-token}"
+NAME="dad-budget-$$"
 DOCKER="${DOCKER:-docker}"
 
 idle_budget_mib=60
@@ -56,9 +56,9 @@ echo "MEASURED image_size_bytes=$image_bytes image_size_MB=$((image_bytes / 1000
 # Boot-to-healthy, idle (no browser, no apps).
 start=$(now_ms)
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
-  -e COMPUTER_AGENT_TOKEN="$TOKEN" \
-  -e DC_BROWSER_START=off \
-  -e DC_AUTOSTART_APPS=0 \
+  -e DAD_TOKEN="$TOKEN" \
+  -e DAD_BROWSER_START=off \
+  -e DAD_AUTOSTART_APPS=0 \
   "$IMAGE" >/dev/null
 port=$(wait_healthy "$NAME") || { echo "FAIL container never became healthy"; exit 1; }
 boot_s=$(python3 -I -c "print(f'{($(now_ms) - $start) / 1000:.3f}')")
@@ -72,13 +72,13 @@ echo "MEASURED idle_mem_MiB=$idle_mib"
 $DOCKER rm -f "$NAME" >/dev/null
 NAME="${NAME}-browser"
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
-  -e COMPUTER_AGENT_TOKEN="$TOKEN" \
-  -e DC_BROWSER_START=boot \
-  -e DC_AUTOSTART_APPS=1 \
+  -e DAD_TOKEN="$TOKEN" \
+  -e DAD_BROWSER_START=boot \
+  -e DAD_AUTOSTART_APPS=1 \
   "$IMAGE" >/dev/null
 port=$(wait_healthy "$NAME") || { echo "FAIL container never became healthy"; exit 1; }
 for _ in $(seq 1 100); do
-  if curl -sf -m 5 -H "X-Computer-Token: $TOKEN" "http://127.0.0.1:${port}/api/browser/frame" >/dev/null 2>&1; then
+  if curl -sf -m 5 -H "X-Dad-Token: $TOKEN" "http://127.0.0.1:${port}/api/browser/frame" >/dev/null 2>&1; then
     break
   fi
   sleep 0.15
@@ -87,9 +87,9 @@ sleep 2
 browser_mib=$(mem_mib "$NAME")
 echo "MEASURED browser_open_mem_MiB=$browser_mib"
 
-# Same container while dc-playwright records the live browser (Node + playwright-core attached over
+# Same container while dad-playwright records the live browser (Node + playwright-core attached over
 # CDP, tracing on). Informational: recording is on demand, so it has no budget of its own.
-$DOCKER exec -d "$NAME" dc-playwright record --name budget
+$DOCKER exec -d "$NAME" dad-playwright record --name budget
 for _ in $(seq 1 100); do
   $DOCKER exec "$NAME" test -e /home/bot/recordings/budget/recorder.pid && break
   sleep 0.1
@@ -97,7 +97,7 @@ done
 sleep 2
 recording_mib=$(mem_mib "$NAME")
 echo "MEASURED browser_recording_mem_MiB=$recording_mib"
-$DOCKER exec "$NAME" dc-playwright stop budget >/dev/null || { echo "FAIL dc-playwright stop"; exit 1; }
+$DOCKER exec "$NAME" dad-playwright stop budget >/dev/null || { echo "FAIL dad-playwright stop"; exit 1; }
 
 fail=0
 if (( idle_mib > idle_budget_mib )); then

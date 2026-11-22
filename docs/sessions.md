@@ -10,7 +10,7 @@ POST /v1/session/acquire
 ```
 
 - `holder.kind` is `agent` or `user`; `holder.name` is required and is what a waiting caller sees. Agents should put a run id in both `name` (or `run_id`) so a human can tell who is driving.
-- `ttl_ms` is optional. The lease TTL comes from `DC_SESSION_LEASE_MS` (default 90000 ms), clamped to 10 s..10 min; a per-acquire `ttl_ms` is clamped the same way.
+- `ttl_ms` is optional. The lease TTL comes from `DAD_SESSION_LEASE_MS` (default 90000 ms), clamped to 10 s..10 min; a per-acquire `ttl_ms` is clamped the same way.
 - Success is `201` with the session: `{"id": "ses_…", "holder": {...}, "acquired_at": "…", "expires_at": "…", "paused": false}`.
 - When a session is already held, acquire returns `409` with the holder, so the caller knows who to wait for:
 
@@ -31,7 +31,7 @@ Extends the lease by its TTL and returns the updated session. The holder is expe
 
 ## Acting
 
-Mutating `/v1` endpoints require the `X-Dc-Session` header with the live session's id. Reads never do. A call with no session, a wrong session, or a paused session gets `409` with the same holder body as acquire. The MCP tools enforce the identical rule in-process via their `session_id` argument (see [mcp.md](mcp.md)).
+Mutating `/v1` endpoints require the `X-Dad-Session` header with the live session's id. Reads never do. A call with no session, a wrong session, or a paused session gets `409` with the same holder body as acquire. The MCP tools enforce the identical rule in-process via their `session_id` argument (see [mcp.md](mcp.md)).
 
 ## Pause and resume
 
@@ -65,13 +65,13 @@ Returns the live session (or `null`) plus what a waiting caller needs to decide 
 GET /v1/session/events?since=N&limit=100
 ```
 
-An in-memory ring (cap 500, oldest drops first) of what happened on the computer: `session.acquired/released/expired/paused/resumed`, `shell.exec`, `files.write/delete/move/mkdir`, `apps.start/stop`, `browser.start/stop/navigate/act`, `health.degraded`. Each event has a monotonic `seq`, a timestamp, a `type`, an `actor` (the session holder's name, or `user`/`system`), and a human-readable `detail` — never secrets. Poll with `since` = the last `latest_seq` seen. The log is in-memory by design: dc-agent is stateless across restarts, and the agent side persists what it needs. Display input is deliberately not logged — it is far too noisy.
+An in-memory ring (cap 500, oldest drops first) of what happened on the computer: `session.acquired/released/expired/paused/resumed`, `shell.exec`, `files.write/delete/move/mkdir`, `apps.start/stop`, `browser.start/stop/navigate/act`, `health.degraded`. Each event has a monotonic `seq`, a timestamp, a `type`, an `actor` (the session holder's name, or `user`/`system`), and a human-readable `detail` — never secrets. Poll with `since` = the last `latest_seq` seen. The log is in-memory by design: dad is stateless across restarts, and the agent side persists what it needs. Display input is deliberately not logged — it is far too noisy.
 
 ## Environment
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `DC_SESSION_LEASE_MS` | `90000` | Lease TTL in milliseconds, clamped to 10000..600000. |
+| `DAD_SESSION_LEASE_MS` | `90000` | Lease TTL in milliseconds, clamped to 10000..600000. |
 
 ## What is NOT here
 

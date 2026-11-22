@@ -1,10 +1,10 @@
 # HTTP API
 
-All routes are served by `dc-agent` on port 8080 inside the container. Publish that port to reach it from the host.
+All routes are served by `dad` on port 8080 inside the container. Publish that port to reach it from the host.
 
 ## Authentication
 
-Send the token from `COMPUTER_AGENT_TOKEN` in the `X-Computer-Token` header. Browser sessions use the `dc_token` cookie set by the portal (see [portal.md](portal.md)). Requests with a missing or wrong token get `401 Unauthorized`. Comparison is constant-time.
+Send the token from `DAD_TOKEN` in the `X-Dad-Token` header. Browser sessions use the `dad_token` cookie set by the portal (see [portal.md](portal.md)). Requests with a missing or wrong token get `401 Unauthorized`. Comparison is constant-time. The pre-rename header names `X-Computer-Token` and `X-Dc-Session` are still accepted as deprecated aliases (see [configuration.md](configuration.md#renamed-from-docker-computer)).
 
 ## The stable `/v1` API
 
@@ -12,7 +12,7 @@ Send the token from `COMPUTER_AGENT_TOKEN` in the `X-Computer-Token` header. Bro
 
 ### Sessions
 
-At most one live session may drive the computer at a time. A caller acquires a session, keeps it alive while working, and releases it when done. Mutating `/v1` endpoints require the `X-Dc-Session` header of a live, unpaused session; reads never do. The full contract — lease, keepalive, pause, takeover/wait, events — is in [sessions.md](sessions.md).
+At most one live session may drive the computer at a time. A caller acquires a session, keeps it alive while working, and releases it when done. Mutating `/v1` endpoints require the `X-Dad-Session` header of a live, unpaused session; reads never do. The full contract — lease, keepalive, pause, takeover/wait, events — is in [sessions.md](sessions.md).
 
 A mutating call without a valid session gets `409 Conflict` with a JSON body naming the current holder when there is one:
 
@@ -23,7 +23,7 @@ A mutating call without a valid session gets `409 Conflict` with a JSON body nam
 ### Health
 
 - `GET /healthz` (no auth) is container liveness only: a bare `200` when the process is up. It says nothing about whether the session is usable, and it is intentionally not changed.
-- `GET /v1/health` (auth) is the real session health check: it probes Chromium (via a live CDP call; `disabled` when `DC_BROWSER_START=off`, and `stopped` — not a failure — when the browser simply is not running because it has not been needed yet, was stopped, or was shut down idle; only a browser that should be running but has no working CDP connection is `down`), the Broadway display, free disk on the home volume, and the live session. Overall `status` is `ok` or `degraded`, with a per-check breakdown in `checks`.
+- `GET /v1/health` (auth) is the real session health check: it probes Chromium (via a live CDP call; `disabled` when `DAD_BROWSER_START=off`, and `stopped` — not a failure — when the browser simply is not running because it has not been needed yet, was stopped, or was shut down idle; only a browser that should be running but has no working CDP connection is `down`), the Broadway display, free disk on the home volume, and the live session. Overall `status` is `ok` or `degraded`, with a per-check breakdown in `checks`.
 
 ### Endpoints
 
@@ -50,7 +50,7 @@ A mutating call without a valid session gets `409 Conflict` with a JSON body nam
 | POST | `/v1/files/mkdir` | yes | Body `{"path":"…"}`. |
 | POST | `/v1/files/move` | yes | Body `{"from":"…","to":"…"}`. Never overwrites an existing destination. A symlink is moved as the link, not its target. |
 | DELETE | `/v1/files?path=&recursive=1` | yes | Deletes a file, or a directory with `recursive=1`. Home itself can never be deleted (`400`). A symlink is deleted as the link; its target is never touched. |
-| POST | `/v1/browser/start` | yes | Starts Chromium on first use. `503` when `DC_BROWSER_START=off`. |
+| POST | `/v1/browser/start` | yes | Starts Chromium on first use. `503` when `DAD_BROWSER_START=off`. |
 | POST | `/v1/browser/stop` | yes | Stops Chromium. The next navigation starts it again. |
 | POST | `/v1/browser/evaluate` | yes | Body `{"expression":"…"}` (64 KiB cap). Runs one JS expression (promises are awaited) and returns its own JSON value: `{"value": 2}` for `1+1`; `undefined` and values with no JSON form are `null`. A thrown exception is `502` with its message. |
 | POST | `/v1/browser/act` | yes | One high-level action: `{"kind":"click"\|"type"\|"select"\|"scroll"\|"key", "selector":"…", …}`. Click/type/scroll take a `selector` (centre of the first match) or `x`/`y` coordinates. Unknown selector → `404 {"error":"selector not found"}`. Success → `204`. |
@@ -101,17 +101,17 @@ The `/api/` endpoints are the desktop's control surface. Agents should use `/v1`
 
 ```bash
 TOKEN=dev-token
-curl -H "X-Computer-Token: $TOKEN" "http://localhost:8080/api/display/screenshot?wait=1" -o desktop.png
-curl -H "X-Computer-Token: $TOKEN" "http://localhost:8080/api/apps"   # registry with ports
-curl -X POST -H "X-Computer-Token: $TOKEN" "http://localhost:8080/api/apps/start?id=terminal"
+curl -H "X-Dad-Token: $TOKEN" "http://localhost:8080/api/display/screenshot?wait=1" -o desktop.png
+curl -H "X-Dad-Token: $TOKEN" "http://localhost:8080/api/apps"   # registry with ports
+curl -X POST -H "X-Dad-Token: $TOKEN" "http://localhost:8080/api/apps/start?id=terminal"
 
 # Agent flow: acquire a session, then act with it.
-SID=$(curl -s -X POST -H "X-Computer-Token: $TOKEN" -d '{"holder":{"kind":"agent","name":"my-run"}}' \
+SID=$(curl -s -X POST -H "X-Dad-Token: $TOKEN" -d '{"holder":{"kind":"agent","name":"my-run"}}' \
   http://localhost:8080/v1/session/acquire | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
-curl -H "X-Computer-Token: $TOKEN" -H "X-Dc-Session: $SID" \
+curl -H "X-Dad-Token: $TOKEN" -H "X-Dad-Session: $SID" \
   -d '{"command":"ls ~"}' http://localhost:8080/v1/shell/exec
-curl -X POST -H "X-Computer-Token: $TOKEN" -d "{\"session_id\":\"$SID\"}" \
+curl -X POST -H "X-Dad-Token: $TOKEN" -d "{\"session_id\":\"$SID\"}" \
   http://localhost:8080/v1/session/keepalive
-curl -X POST -H "X-Computer-Token: $TOKEN" -d "{\"session_id\":\"$SID\"}" \
+curl -X POST -H "X-Dad-Token: $TOKEN" -d "{\"session_id\":\"$SID\"}" \
   http://localhost:8080/v1/session/release
 ```
