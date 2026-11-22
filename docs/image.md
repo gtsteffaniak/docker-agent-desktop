@@ -131,11 +131,27 @@ Put keys in the `dc-ssh` volume, owned by uid 1000 with mode 600 for private key
 
 ## Size and efficiency
 
-Measured on the runtime image:
+Measured on the default build (`make budgets`, `make dive`). Sizes are bytes as Docker reports them
+(`docker image inspect .Size`, uncompressed on overlay2); MB = 10^6 bytes. "gzip" is the sum of each
+layer tar from `docker save` compressed with gzip -6, an approximation of the registry download.
 
-- Size: about 950 MB (Chromium and its libraries, GTK 3, and the desktop apps make up most of it).
-- Efficiency: about 99.6%, measured with dive.
-- Removed on purpose: the Mesa GPU drivers, LLVM, z3, the Vulkan layers and the software Vulkan rasteriser. Headless Chromium runs with `--disable-gpu`. Also removed: man pages and documentation (copyright files stay).
+| | Uncompressed | gzip | dive |
+|---|---|---|---|
+| Default build | 712.8 MB (679 MiB) | 278.9 MB | 0 B wasted, 100% efficiency |
+| `WITH_EMOJI_FONT=1` | 724.1 MB | 289.3 MB | 0 B wasted, 100% efficiency |
+
+What is in it: Chromium and its libraries, GTK 3 and the desktop apps make up most of the image.
+Node.js and `playwright-core` add about 79 MB (Debian's `nodejs` 20 with `libnode`, 64 MiB, and
+`playwright-core`, 14 MiB). PRoot adds 0.3 MB.
+
+Removed on purpose: the Mesa GPU drivers, LLVM, z3, the Vulkan layers and the software Vulkan
+rasteriser (headless Chromium runs with `--disable-gpu`); man pages and documentation (copyright
+files stay); the colour emoji font unless `WITH_EMOJI_FONT` is set; npm (build stage only); and
+Playwright's own browsers (never downloaded; `dc-playwright` uses the image's Chromium).
+
+Memory (container cgroup usage, MiB): idle about 6 MiB; Chromium plus the GTK apps about 260 MiB
+(budget 400); while `dc-playwright record` runs, about 80 MiB more (the Node process), released
+when the recording stops. Boot to healthy: about 0.25 s.
 
 ## Gates
 
