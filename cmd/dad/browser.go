@@ -18,20 +18,6 @@ import (
 
 const browserCallTimeout = 5 * time.Second
 
-// registerBrowser adds the browser window routes. wrap guards them: the TCP mux passes the
-// token check, and the unix socket mux (private to the container user) passes them through.
-func (a *Agent) registerBrowser(mux *http.ServeMux, wrap func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /api/browser/frame", wrap(a.handleBrowserFrame))
-	mux.HandleFunc("GET /api/browser/state", wrap(a.handleBrowserState))
-	mux.HandleFunc("POST /api/browser/navigate", wrap(a.handleBrowserNavigate))
-	mux.HandleFunc("POST /api/browser/back", wrap(a.browserAction((*cdp.Screencast).GoBack)))
-	mux.HandleFunc("POST /api/browser/forward", wrap(a.browserAction((*cdp.Screencast).GoForward)))
-	mux.HandleFunc("POST /api/browser/reload", wrap(a.browserAction((*cdp.Screencast).Reload)))
-	mux.HandleFunc("POST /api/browser/input", wrap(a.handleBrowserInput))
-	mux.HandleFunc("POST /api/browser/size", wrap(a.handleBrowserSize))
-	mux.HandleFunc("GET /api/browser/ws", wrap(a.handleBrowserWS))
-}
-
 func (a *Agent) screencast() *cdp.Screencast {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -48,6 +34,42 @@ func (a *Agent) current(w http.ResponseWriter) *cdp.Screencast {
 	return sc
 }
 
+// browserNavigateRequest is the body of POST /v1/browser/navigate.
+type browserNavigateRequest struct {
+	URL string `json:"url"`
+}
+
+// browserNavigateResponse is the reply to POST /v1/browser/navigate: the normalized URL
+// that was navigated to.
+type browserNavigateResponse struct {
+	URL string `json:"url"`
+}
+
+// browserInputRequest is the body of POST /v1/browser/input: one pointer, scroll, key or
+// paste event. Which fields apply depends on type.
+type browserInputRequest struct {
+	Type    string  `json:"type"` // pointer | key | scroll | paste
+	Action  string  `json:"action,omitempty"`
+	X       float64 `json:"x,omitempty"`
+	Y       float64 `json:"y,omitempty"`
+	Button  int     `json:"button,omitempty"`
+	Buttons int     `json:"buttons,omitempty"`
+	Clicks  int     `json:"clicks,omitempty"`
+	Mods    int     `json:"mods,omitempty"`
+	Key     string  `json:"key,omitempty"`
+	Code    string  `json:"code,omitempty"`
+	Text    string  `json:"text,omitempty"`
+	DX      float64 `json:"dx,omitempty"`
+	DY      float64 `json:"dy,omitempty"`
+}
+
+// browserSizeRequest is the body of POST /v1/browser/size.
+type browserSizeRequest struct {
+	W     int     `json:"w"`
+	H     int     `json:"h"`
+	Scale float64 `json:"scale,omitempty"`
+}
+
 // handleBrowserFrame returns an image of the page.
 //
 // Without ?since it takes a fresh screenshot with Page.captureScreenshot, so it works whether or
@@ -57,6 +79,23 @@ func (a *Agent) current(w http.ResponseWriter) *cdp.Screencast {
 // With ?since=N it serves the screencast for a polling client: each poll keeps the stream running
 // for cdp.DefaultLinger, and the reply is 204 when no frame newer than N exists. The first poll
 // after the stream was idle waits briefly for a fresh frame, so it does not return a stale one.
+// @Summary Browser frame
+// @Description One frame of the page. Without ?since it takes a fresh screenshot (JPEG by default, PNG with ?format=png). With ?since=N it serves the screencast for a polling client: 204 when no frame newer than N exists. The X-Frame-Seq header carries the frame sequence number to poll with next.
+// @Tags browser
+// @Produce jpeg
+// @Produce png
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param format query string false "Image format" Enums(jpeg, png)
+// @Param since query integer false "Poll: only a frame newer than this sequence number (JPEG only)"
+// @Success 200 {file} string "Frame image"
+// @Success 204 "No frame newer than ?since="
+// @Failure 400 {string} string "Unknown format, or since polling with format=png"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 503 {string} string "Chromium not running"
+// @Failure 504 {string} string "Screenshot timed out"
+// @Header 200 {string} X-Frame-Seq "Sequence number of the frame"
+// @Security ApiKeyAuth
+// @Router /v1/browser/frame [get]
 func (a *Agent) handleBrowserFrame(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
@@ -112,6 +151,17 @@ func (a *Agent) handleBrowserFrame(w http.ResponseWriter, r *http.Request) {
 // handleBrowserState returns the page's real URL, title and history availability. ?fmt=lines
 // returns a plain text form for the C browser window, so it needs no JSON parser:
 // url, title, back=0|1, forward=0|1, seq=N, one per line.
+// @Summary Browser state
+// @Description The page's real URL, title and history availability. ?fmt=lines returns a plain text form (url, title, back=0|1, forward=0|1, seq=N, one per line). Chromium not running yet is running=false, not an error.
+// @Tags browser
+// @Produce json
+// @Produce plain
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param fmt query string false "Plain-text form" Enums(lines)
+// @Success 200 {object} browserStateOut "Navigation state"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Security ApiKeyAuth
+// @Router /v1/browser/state [get]
 func (a *Agent) handleBrowserState(w http.ResponseWriter, r *http.Request) {
 	sc := a.screencast()
 	if sc == nil {
@@ -151,6 +201,24 @@ func b2i(b bool) int {
 	return 0
 }
 
+// handleBrowserNavigate navigates the page. Navigating is what starts Chromium, so the first
+// address starts it. The reply is the normalized URL that was navigated to.
+// @Summary Navigate the browser
+// @Description Navigates the page. Navigating is what starts Chromium, so the first address starts it. The reply is the normalized URL that was navigated to.
+// @Tags browser
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserNavigateRequest true "URL to navigate to"
+// @Success 200 {object} browserNavigateResponse "Normalized URL navigated to"
+// @Failure 400 {string} string "Unparsable body, or unusable URL"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Navigation failed"
+// @Failure 503 {string} string "Chromium could not start"
+// @Security ApiKeyAuth
+// @Router /v1/browser/navigate [post]
 func (a *Agent) handleBrowserNavigate(w http.ResponseWriter, r *http.Request) {
 	// Navigating is what starts Chromium, so the first address the user enters starts it.
 	sc, err := a.ensureBrowser(r.Context())
@@ -158,9 +226,7 @@ func (a *Agent) handleBrowserNavigate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	var body struct {
-		URL string `json:"url"`
-	}
+	var body browserNavigateRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -176,7 +242,7 @@ func (a *Agent) handleBrowserNavigate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]string{"url": target})
+	writeJSON(w, browserNavigateResponse{URL: target})
 }
 
 // browserAction wraps a no-argument screencast action (back, forward, reload).
@@ -196,7 +262,73 @@ func (a *Agent) browserAction(fn func(*cdp.Screencast, context.Context) error) h
 	}
 }
 
+// handleBrowserBack goes back in the page history.
+// @Summary Browser back
+// @Description Goes back in the page history.
+// @Tags browser
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Success 204 "Went back"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Navigation failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/back [post]
+func (a *Agent) handleBrowserBack(w http.ResponseWriter, r *http.Request) {
+	a.browserAction((*cdp.Screencast).GoBack)(w, r)
+}
+
+// handleBrowserForward goes forward in the page history.
+// @Summary Browser forward
+// @Description Goes forward in the page history.
+// @Tags browser
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Success 204 "Went forward"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Navigation failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/forward [post]
+func (a *Agent) handleBrowserForward(w http.ResponseWriter, r *http.Request) {
+	a.browserAction((*cdp.Screencast).GoForward)(w, r)
+}
+
+// handleBrowserReload reloads the page.
+// @Summary Reload the browser
+// @Description Reloads the page.
+// @Tags browser
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Success 204 "Reloaded"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Navigation failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/reload [post]
+func (a *Agent) handleBrowserReload(w http.ResponseWriter, r *http.Request) {
+	a.browserAction((*cdp.Screencast).Reload)(w, r)
+}
+
 // handleBrowserInput forwards one pointer, scroll, key or paste event to the page.
+// @Summary Send browser input
+// @Description Forwards one pointer, scroll, key or paste event to the page. Which fields apply depends on type: pointer takes action/x/y/button/buttons/clicks/mods, key takes action/key/code/text/mods, scroll takes x/y/dx/dy/mods, paste takes text.
+// @Tags browser
+// @Accept json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserInputRequest true "One input event"
+// @Success 204 "Input delivered"
+// @Failure 400 {string} string "Unparsable body, or unknown input type"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Input failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/input [post]
 func (a *Agent) handleBrowserInput(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
@@ -251,16 +383,28 @@ func (a *Agent) handleBrowserInput(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleBrowserSize sets the browser viewport size.
+// @Summary Set browser viewport size
+// @Description Sets the browser viewport size (CSS pixels, with the device pixel ratio as scale).
+// @Tags browser
+// @Accept json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserSizeRequest true "Viewport width, height and scale"
+// @Success 204 "Viewport resized"
+// @Failure 400 {string} string "Unparsable body"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Resize failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/size [post]
 func (a *Agent) handleBrowserSize(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
 		return
 	}
-	var body struct {
-		W     int     `json:"w"`
-		H     int     `json:"h"`
-		Scale float64 `json:"scale"`
-	}
+	var body browserSizeRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

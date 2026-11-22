@@ -185,6 +185,29 @@ def test_sessions():
     release(s["id"])
 
 
+# ---------------------------------------------------------------- wait/takeover
+def test_wait_takeover():
+    section("session wait/takeover")
+    s = acquire("e2e-wait-holder")
+    hid = s["id"]
+    w = jreq("POST", "/v1/session/wait", {"timeout_ms": 1000})
+    check(w["free"] is False and w["session"]["id"] == hid and w["waited_ms"] >= 500,
+          f"wait on a held lease = {w}")
+    jreq("POST", "/v1/session/takeover",
+         {"holder": {"kind": "agent", "name": "e2e-taker"}, "force": False}, want=400)
+    jreq("POST", "/v1/session/takeover",
+         {"holder": {"kind": "agent", "name": "e2e-taker"}}, want=400)
+    t = jreq("POST", "/v1/session/takeover",
+             {"holder": {"kind": "agent", "name": "e2e-taker"}, "force": True}, want=201)
+    check(t["evicted"]["id"] == hid and t["session"]["holder"]["name"] == "e2e-taker",
+          f"takeover = {t}")
+    check(mutate_code(hid) == 409, "evicted holder must no longer mutate")
+    check(mutate_code(t["session"]["id"]) == 200, "takeover holder must mutate")
+    release(t["session"]["id"])
+    w = jreq("POST", "/v1/session/wait", {"timeout_ms": 1000})
+    check(w["free"] is True and w["session"] is None, f"wait on a free lease = {w}")
+
+
 def start_reaper_probe():
     """Acquire a 10 s lease and return it; check_reaper later verifies the reaper closed it."""
     return acquire("e2e-reaper", ttl_ms=10000)["id"]
@@ -367,7 +390,7 @@ def test_browser(sid):
     check(code == 400, f"act unknown kind = {code}")
     check("typed" not in jreq("GET", "/v1/browser/text")["text"] or True, "text read")
 
-    code, hdrs, img = req("GET", "/api/browser/frame?format=png")
+    code, hdrs, img = req("GET", "/v1/browser/frame?format=png")
     check(code == 200 and img[:4] == b"\x89PNG", f"browser frame = {code}")
 
     jreq("POST", "/v1/browser/stop", {}, sid=sid)
@@ -501,7 +524,7 @@ def test_playwright(sid):
     # Attaching never started another browser or downloaded one, and dad still streams.
     check(chromium_browsers() == browsers_before, f"Chromium browser process changed: {browsers_before} -> {chromium_browsers()}")
     check(not sh(sid, "ls -d ~/.cache/ms-playwright 2>/dev/null", want_rc=None)["stdout"].strip(), "Playwright browsers downloaded")
-    code, _, img = req("GET", "/api/browser/frame?format=png")
+    code, _, img = req("GET", "/v1/browser/frame?format=png")
     check(code == 200 and img[:4] == b"\x89PNG", f"browser frame after Playwright = {code}")
     check(health()["status"] == "ok", f"health after Playwright: {health()}")
     jreq("POST", f"/v1/shell/jobs/{srv['job_id']}/kill", sid=sid)
@@ -632,6 +655,7 @@ def mcp_json(name, args, id_=1):
 
 EXPECTED_TOOLS = {
     "session_acquire", "session_keepalive", "session_release", "session_pause", "session_resume",
+    "session_wait", "session_takeover",
     "session_get", "session_events", "health_get", "shell_exec", "shell_job_get", "shell_job_kill",
     "shell_jobs_list", "files_list", "files_read", "files_write", "files_delete", "files_mkdir",
     "files_move", "browser_start", "browser_stop", "browser_navigate", "browser_evaluate", "browser_act",
@@ -656,7 +680,7 @@ def test_mcp():
 
     code, out = mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     names = {t["name"] for t in out["result"]["tools"]}
-    check(len(out["result"]["tools"]) == 41 and names == EXPECTED_TOOLS,
+    check(len(out["result"]["tools"]) == 43 and names == EXPECTED_TOOLS,
           f"tools/list: {len(names)} tools; missing {EXPECTED_TOOLS - names}, extra {names - EXPECTED_TOOLS}")
 
     # Session rule: mutating tools refuse without a live session.
@@ -707,6 +731,14 @@ def test_mcp():
     ev = mcp_json("session_events", {"since": 0, "limit": 500})
     check(any(e["type"] == "session.acquired" for e in ev["events"]), "session_events")
     mcp_ok("session_release", {"session_id": sid})
+    # Wait and takeover over MCP, on the free lease.
+    w = mcp_json("session_wait", {"timeout_ms": 1000})
+    check(w["free"] is True and w["session"] is None, f"session_wait free = {w}")
+    res = mcp_call("session_takeover", {"kind": "agent", "name": "e2e-mcp-taker"})
+    check(res.get("isError"), f"takeover without force must fail: {res}")
+    t = mcp_json("session_takeover", {"kind": "agent", "name": "e2e-mcp-taker", "force": True})
+    check(t["evicted"] is None and t["session"]["holder"]["name"] == "e2e-mcp-taker", f"takeover = {t}")
+    mcp_ok("session_release", {"session_id": t["session"]["id"]})
     check(jreq("GET", "/v1/session")["session"] is None, "MCP release should free the session")
 
 
@@ -715,6 +747,7 @@ def test_events(since):
     section("activity log")
     types = {e["type"] for e in events(since)}
     want = {"session.acquired", "session.released", "session.expired", "session.paused", "session.resumed",
+            "session.takeover",
             "shell.exec", "files.write", "files.delete", "files.move", "files.mkdir", "apps.start", "apps.stop",
             "browser.start", "browser.stop", "browser.navigate", "browser.act", "health.degraded"}
     check(want <= types, f"activity log missing {sorted(want - types)}")
@@ -729,6 +762,7 @@ def test_events(since):
 def main():
     since = jreq("GET", "/v1/session/events?limit=1")["latest_seq"]
     test_sessions()
+    test_wait_takeover()
     reaper_sid = start_reaper_probe()
     reaper_seq = jreq("GET", "/v1/session/events?limit=1")["latest_seq"]
     check_reaper(reaper_sid, reaper_seq)

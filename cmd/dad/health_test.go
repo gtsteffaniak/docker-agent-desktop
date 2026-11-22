@@ -15,21 +15,21 @@ func TestHealthDegradedWithoutBroadway(t *testing.T) {
 	a := &Agent{token: testToken, log: slog.New(slog.DiscardHandler), startedAt: time.Now()}
 
 	h := a.sessionHealth(t.Context())
-	if h["status"] != "degraded" {
-		t.Fatalf("status = %v, want degraded (broadway down)", h["status"])
+	if h.Status != "degraded" {
+		t.Fatalf("status = %v, want degraded (broadway down)", h.Status)
 	}
-	checks, _ := h["checks"].(map[string]any)
-	if checks["chromium"] != "disabled" {
-		t.Fatalf("chromium = %v, want disabled", checks["chromium"])
+	checks := h.Checks
+	if checks.Chromium != "disabled" {
+		t.Fatalf("chromium = %v, want disabled", checks.Chromium)
 	}
-	if checks["broadway"] != "down" {
-		t.Fatalf("broadway = %v, want down", checks["broadway"])
+	if checks.Broadway != "down" {
+		t.Fatalf("broadway = %v, want down", checks.Broadway)
 	}
-	if checks["disk"] != "ok" {
-		t.Fatalf("disk = %v, want ok", checks["disk"])
+	if checks.Disk != "ok" {
+		t.Fatalf("disk = %v, want ok", checks.Disk)
 	}
-	if _, ok := checks["session"]; !ok {
-		t.Fatal("session check missing")
+	if checks.Session.Held {
+		t.Fatal("session check should report no session held")
 	}
 }
 

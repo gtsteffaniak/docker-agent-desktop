@@ -58,10 +58,31 @@ type Agent struct {
 	// degraded is logged once instead of on every poll. It is atomic because
 	// concurrent health polls read and flip it.
 	healthDegraded atomic.Bool
+	// routes records every API route registered by handler, in registration
+	// order. The OpenAPI contract test asserts the generated spec covers
+	// exactly these routes.
+	routes []string
 }
 
+// Docker Agent Desktop API.
+//
+// The stable /v1 API: the only agent surface. One session lease gates all
+// mutations; reads are open to any authed caller. Auth is the X-Dad-Token
+// header (or the dad_token portal cookie as an alternative). /healthz is a
+// bare 200 for container liveness and /v1/meta is unauthenticated; everything
+// else requires the token.
+//
+// @title Docker Agent Desktop API
+// @version 1
+// @description The stable /v1 API of docker-agent-desktop: shell, files, browser, display, apps, sessions, health and the activity log, plus the MCP Streamable HTTP endpoint. There is no unversioned /api surface: it was removed in the initial release, together with the pre-rename auth names, rather than deprecated.
+// @license.name Apache-2.0
+// @license.url https://www.apache.org/licenses/LICENSE-2.0
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-Dad-Token
+// @description Agent token, set from DAD_TOKEN. The dad_token portal cookie is accepted as an alternative.
 func main() {
-	token, legacyToken := tokenFromEnv(os.Getenv)
+	token := tokenFromEnv(os.Getenv)
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "DAD_TOKEN is required")
 		os.Exit(2)
@@ -71,13 +92,54 @@ func main() {
 		fmt.Fprintf(os.Stderr, "logging: %v\n", err)
 		os.Exit(2)
 	}
-	if legacyToken {
-		log.Warn("COMPUTER_AGENT_TOKEN is deprecated; set DAD_TOKEN instead")
-	}
 	if err := run(token, log); err != nil {
 		log.Error("agent stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// handler builds the HTTP mux: every API route plus the portal/desktop
+// mounts. It is a method (not inline in run) so the OpenAPI contract test
+// can build the same mux and read a.routes.
+func (a *Agent) handler() *http.ServeMux {
+	mux := http.NewServeMux()
+	a.handle(mux, "GET /healthz", a.handleHealthz)
+	// /v1/health is the real session health check, registered by registerV1 below.
+	// /healthz above stays a bare 200: container liveness only.
+	a.handle(mux, "GET /v1/meta", a.handleAPIMeta)
+	a.registerV1(mux, a.auth)
+	a.registerMCP(mux, a.auth)
+	a.mountPortal(mux)
+	return mux
+}
+
+// handleHealthz is the container liveness probe: a bare 200, nothing more.
+// @Summary Container liveness
+// @Description Bare 200. Container liveness only, not session health: use GET /v1/health for whether the session is actually usable.
+// @Tags meta
+// @Produce plain
+// @Success 200 "Alive"
+// @Router /healthz [get]
+func (a *Agent) handleHealthz(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
+
+// handleAPIMeta returns the API version.
+// @Summary API version
+// @Description Unauthenticated. Returns the API version ("1").
+// @Tags meta
+// @Produce json
+// @Success 200 {object} apiVersionResponse "API version"
+// @Router /v1/meta [get]
+func (a *Agent) handleAPIMeta(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, apiVersionResponse{APIVersion: "1"})
+}
+
+// handle registers one API route and records its pattern, so the OpenAPI
+// contract test can assert the generated spec covers exactly the routes the
+// server registers. Non-API mounts (portal, desktop, app proxy) use
+// mux.HandleFunc directly and are not in the spec.
+func (a *Agent) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
+	a.routes = append(a.routes, pattern)
+	mux.HandleFunc(pattern, h)
 }
 
 func run(token string, log *slog.Logger) error {
@@ -101,28 +163,10 @@ func run(token string, log *slog.Logger) error {
 	go a.autostartApps()
 	go a.reapSessions(ctx)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	// /v1/health is the real session health check, registered by registerV1 below.
-	// /healthz above stays a bare 200: container liveness only.
-	mux.HandleFunc("GET /v1/meta", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]string{"api_version": "1"})
-	})
-	mux.HandleFunc("GET /api/display/meta", a.auth(a.handleBroadwayMeta))
-	mux.HandleFunc("GET /api/display/screenshot", a.auth(a.handleScreenshot))
-	mux.HandleFunc("POST /api/display/click", a.auth(a.handleClick))
-	mux.HandleFunc("POST /api/display/type", a.auth(a.handleType))
-	a.registerBrowser(mux, a.auth)
-	mux.HandleFunc("GET /api/apps", a.auth(a.handleApps))
-	mux.HandleFunc("POST /api/apps/start", a.auth(a.handleAppStart))
-	a.registerV1(mux, a.auth)
-	a.registerMCP(mux, a.auth)
-	a.mountPortal(mux)
-
 	addr := envOr("DAD_ADDR", "0.0.0.0:8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           a.logRequests(mux),
+		Handler:           a.logRequests(a.handler()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -138,35 +182,20 @@ func run(token string, log *slog.Logger) error {
 	return nil
 }
 
-// Deprecated names from before the docker-computer -> docker-agent-desktop rename. They are
-// still accepted so existing clients (quantum-bots' adapter) keep working; remove them once those
-// clients send the new names.
 const (
-	legacyTokenEnv      = "COMPUTER_AGENT_TOKEN"
-	tokenHeader         = "X-Dad-Token"
-	legacyTokenHeader   = "X-Computer-Token"
-	legacySessionHeader = "X-Dc-Session"
+	tokenHeader = "X-Dad-Token"
 )
 
-// tokenFromEnv reads DAD_TOKEN, falling back to the deprecated COMPUTER_AGENT_TOKEN. legacy
-// reports that the fallback was used.
-func tokenFromEnv(getenv func(string) string) (token string, legacy bool) {
-	if v := getenv("DAD_TOKEN"); v != "" {
-		return v, false
-	}
-	if v := getenv(legacyTokenEnv); v != "" {
-		return v, true
-	}
-	return "", false
+// tokenFromEnv reads DAD_TOKEN. There are no fallback names: the pre-rename
+// COMPUTER_AGENT_TOKEN was removed with the legacy /api routes, not deprecated.
+func tokenFromEnv(getenv func(string) string) string {
+	return getenv("DAD_TOKEN")
 }
 
-// tokenFrom returns the request's token: header first (X-Dad-Token, then the deprecated
-// X-Computer-Token), then the portal cookie.
+// tokenFrom returns the request's token: the X-Dad-Token header, then the
+// portal cookie.
 func tokenFrom(r *http.Request) string {
 	if v := r.Header.Get(tokenHeader); v != "" {
-		return v
-	}
-	if v := r.Header.Get(legacyTokenHeader); v != "" {
 		return v
 	}
 	if c, err := r.Cookie(cookieName); err == nil {
@@ -218,7 +247,7 @@ func (a *Agent) logRequests(next http.Handler) http.Handler {
 // quietRoute reports routes that the browser window calls many times a second.
 func quietRoute(path string) bool {
 	switch path {
-	case "/api/browser/frame", "/api/browser/state", "/api/browser/input", "/api/browser/ws":
+	case "/v1/browser/frame", "/v1/browser/state", "/v1/browser/input", "/v1/browser/stream":
 		return true
 	}
 	return false
@@ -244,12 +273,47 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return h.Hijack()
 }
 
+// apiVersionResponse is the GET /v1/meta body.
+type apiVersionResponse struct {
+	APIVersion string `json:"api_version" example:"1"`
+}
+
+// appStartResponse is the POST /v1/apps/start body.
+type appStartResponse struct {
+	ID      string `json:"id"`
+	Running bool   `json:"running"`
+}
+
+// handleBroadwayMeta returns the Broadway display's debug state as raw JSON.
+// @Summary Display debug state
+// @Description Raw Broadway debug JSON (display size, connection state). Free-form: the shape is Broadway's, not this API's.
+// @Tags display
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Success 200 {object} map[string]any "Broadway debug state"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Security ApiKeyAuth
+// @Router /v1/display/meta [get]
 func (a *Agent) handleBroadwayMeta(w http.ResponseWriter, _ *http.Request) {
 	b, _ := a.broadway.MarshalDebug()
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(b)
 }
 
+// handleScreenshot returns the current display frame as a PNG. With ?wait=1 it waits up to
+// 15 s for a fresh frame first.
+// @Summary Display screenshot
+// @Description The current display frame as a PNG. With ?wait=1 it waits up to 15 s for a fresh frame first.
+// @Tags display
+// @Produce png
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param wait query string false "Wait for a fresh frame first" Enums(1)
+// @Success 200 {file} string "PNG image"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 500 {string} string "Screenshot failed"
+// @Failure 504 {string} string "No frame within the wait"
+// @Security ApiKeyAuth
+// @Router /v1/display/screenshot [get]
 func (a *Agent) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("wait") == "1" {
 		c, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -268,37 +332,6 @@ func (a *Agent) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(png)
 }
 
-func (a *Agent) handleClick(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		X int32 `json:"x"`
-		Y int32 `json:"y"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.broadway.ClickAt(body.X, body.Y); err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *Agent) handleType(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Text string `json:"text"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := a.broadway.TypeText(body.Text); err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // appDirs lists the registry directories, system first so user entries override it.
 func appDirs() []string {
 	def := "/etc/dad/apps.d:" + filepath.Join(envOr("HOME", "/home/bot"), ".config/dad/apps.d")
@@ -314,10 +347,6 @@ func (a *Agent) loadApps() []apps.App {
 	return list
 }
 
-func (a *Agent) handleApps(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"apps": a.loadApps()})
-}
-
 // handleAppStart starts one registry app: its Broadway display first, then the app. Starting an
 // app that is already running does nothing. The browser has no process to start here; Chromium
 // is started by maybeStartChromium.
@@ -329,7 +358,7 @@ func (a *Agent) handleAppStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if app.Port == 0 {
-		writeJSON(w, map[string]any{"id": id, "running": a.screencast() != nil})
+		writeJSON(w, appStartResponse{ID: id, Running: a.screencast() != nil})
 		return
 	}
 	if err := a.startApp(app); err != nil {
@@ -337,7 +366,7 @@ func (a *Agent) handleAppStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"id": id, "running": true})
+	writeJSON(w, appStartResponse{ID: id, Running: true})
 }
 
 // browserMode reads DAD_BROWSER_START. "boot" starts Chromium with the agent. "off" disables the

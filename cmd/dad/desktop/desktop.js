@@ -26,6 +26,80 @@ let layout = {};            // id -> { x, y, w, h, z, minimized, maximized, rest
 const windows = new Map();  // id -> section element
 const browserRuns = new Map(); // id -> { alive: bool }
 
+// ---- Session ----------------------------------------------------------------------------------
+//
+// The /v1 mutating routes (app start, browser control over the socket) are session-gated: only
+// the session holder may act. The desktop holds one "user" session for its mutations, acquired
+// lazily on first use, kept alive every 30 s, and released on unload. If an agent holds the
+// session, acquisition returns 409 and the desktop keeps working read-only (frames and state
+// still flow) until the agent releases it — mutations are refused with the holder named,
+// instead of silently failing as they did before. The acquire is de-duplicated so a browser
+// window mounting while an app window opens does not race itself into a 409.
+
+let desktopSession = null;       // our session id, or null when we hold nothing
+let desktopHolder = null;        // who holds the session when it is not ours
+let sessionPromise = null;       // in-flight acquire, so concurrent callers share one
+let sessionTimer = 0;            // keepalive interval
+
+async function acquireDesktopSession() {
+  if (desktopSession) return desktopSession;
+  if (!sessionPromise) {
+    sessionPromise = (async () => {
+      try {
+        const res = await fetch("/v1/session/acquire", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ holder: { kind: "user", name: "desktop" }, ttl_ms: 300000 }),
+        });
+        if (res.ok) {
+          const body = await res.json();
+          desktopSession = body.id;
+          desktopHolder = null;
+          if (!sessionTimer) sessionTimer = setInterval(keepaliveDesktopSession, 30000);
+          return desktopSession;
+        }
+        if (res.status === 409) {
+          const body = await res.json().catch(() => null);
+          desktopHolder = body && body.holder ? body.holder : null;
+        }
+      } catch {
+        // Offline or the agent is down: retry on the next mutation.
+      }
+      return null;
+    })().finally(() => { sessionPromise = null; });
+  }
+  return sessionPromise;
+}
+
+async function keepaliveDesktopSession() {
+  if (!desktopSession) return;
+  try {
+    const res = await fetch("/v1/session/keepalive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: desktopSession }),
+    });
+    if (!res.ok) desktopSession = null; // expired or taken over; re-acquire on next use
+  } catch {
+    // Keep the id; the next keepalive or acquire retries.
+  }
+}
+
+function releaseDesktopSession() {
+  if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = 0; }
+  if (!desktopSession) return;
+  const id = desktopSession;
+  desktopSession = null;
+  fetch("/v1/session/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: id }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+window.addEventListener("pagehide", releaseDesktopSession);
+
 // ---- Icons ------------------------------------------------------------------------------------
 
 const ICONS = {
@@ -251,9 +325,15 @@ function ensureWindow(id) {
     content.appendChild(frame);
     // Start the app's display first, so the frame does not load before the app is listening.
     // Starting a running app does nothing on the agent, so reopening a window is cheap.
-    fetch(`/api/apps/start?id=${encodeURIComponent(app.id)}`, { method: "POST", cache: "no-store" })
-      .catch(() => {})
-      .finally(() => { frame.src = `/apps/${encodeURIComponent(app.id)}/`; });
+    // App start is session-gated: the desktop acquires its user session first. If an agent
+    // holds the session the start is refused (409) and the frame still loads — reads are
+    // open — but the app may not be running behind it; reopening the window retries.
+    acquireDesktopSession().then((sid) => {
+      const headers = sid ? { "X-Dad-Session": sid } : {};
+      fetch(`/v1/apps/start?id=${encodeURIComponent(app.id)}`, { method: "POST", headers, cache: "no-store" })
+        .catch(() => {})
+        .finally(() => { frame.src = `/apps/${encodeURIComponent(app.id)}/`; });
+    });
   }
 
   for (const edge of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) {
@@ -432,8 +512,8 @@ function beginResize(id, edge, e) {
 
 // ---- Browser window ----------------------------------------------------------------------------
 //
-// Chromium runs headless on the agent. The agent streams frames (/api/browser/frame), reports
-// the real URL and history (/api/browser/state), and takes input (/api/browser/input). The
+// Chromium runs headless on the agent. The agent streams frames (/v1/browser/stream), reports
+// the real URL and history (/v1/browser/state), and takes input over the same socket. The
 // address bar follows the real URL unless the user is typing in it.
 
 function mountBrowser(content, windowEl) {
@@ -557,10 +637,16 @@ function mountBrowser(content, windowEl) {
     lastUrl = st.url;
   };
 
-  const connect = () => {
+  const connect = async () => {
+    if (!run.alive) return;
+    // A WebSocket cannot carry the X-Dad-Session header, so the session travels as
+    // ?session=<id> at connect time. Without a session the socket still streams frames
+    // and state, but every control message is refused until a session is bound.
+    const sid = await acquireDesktopSession();
     if (!run.alive) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const s = new WebSocket(`${proto}//${location.host}/api/browser/ws`);
+    const query = sid ? `?session=${encodeURIComponent(sid)}` : "";
+    const s = new WebSocket(`${proto}//${location.host}/v1/browser/stream${query}`);
     s.binaryType = "blob";
     s.onmessage = async (ev) => {
       if (typeof ev.data !== "string") {
@@ -744,7 +830,7 @@ function mountBrowser(content, windowEl) {
 
 async function loadApps() {
   try {
-    const res = await fetch("/api/apps", { cache: "no-store" });
+    const res = await fetch("/v1/apps", { cache: "no-store" });
     if (res.ok) {
       const body = await res.json();
       if (Array.isArray(body.apps) && body.apps.length) return body.apps;

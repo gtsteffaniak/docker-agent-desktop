@@ -18,7 +18,7 @@ POST /v1/session/acquire
 {"error": "session held by agent-run-42", "holder": {"kind": "agent", "name": "agent-run-42"}, "expires_at": "…", "paused": false}
 ```
 
-The `409` never includes the holder's session id: the id is what authorizes mutating calls, so only the caller that acquired the session knows it. There is no queue and no force-take on this side. A caller that needs the computer waits and retries, or the user takes over from the desktop (see below).
+The `409` never includes the holder's session id: the id is what authorizes mutating calls, so only the caller that acquired the session knows it. There is no queue. A caller that needs the computer waits with `POST /v1/session/wait` (see below) and retries, or takes the lease over explicitly with `POST /v1/session/takeover`.
 
 ## Keepalive
 
@@ -33,6 +33,12 @@ Extends the lease by its TTL and returns the updated session. The holder is expe
 
 Mutating `/v1` endpoints require the `X-Dad-Session` header with the live session's id. Reads never do. A call with no session, a wrong session, or a paused session gets `409` with the same holder body as acquire. The MCP tools enforce the identical rule in-process via their `session_id` argument (see [mcp.md](mcp.md)).
 
+The web desktop is a client like any other: it holds one `user` session (`holder.name: "desktop"`, 5 min lease, 30 s keepalive, released on page hide) for its mutations (app start, browser control). While an agent holds the lease the desktop keeps working read-only — frames and state still flow — and its mutations are refused with the holder named.
+
+## Browser stream
+
+The live browser socket (`GET /v1/browser/stream`, see [api.md](api.md)) cannot carry the `X-Dad-Session` header, so the session travels as `?session=<id>` at connect, or a `{"type":"session","session_id":"..."}` message that (re)binds the socket mid-connection. Frames and state flow without a session (reads); every control message is refused while no live, unpaused session is bound. The gate re-checks the bound session against the live lease on every message, so expiry, release, pause and takeover take effect mid-connection.
+
 ## Pause and resume
 
 ```
@@ -41,6 +47,24 @@ POST /v1/session/resume  {"session_id": "ses_…"}
 ```
 
 A paused session keeps the lease — nobody else can acquire — but mutating calls with it get `409`. This is the user-takeover hook: the desktop (or the agent's owner) pauses the agent's session, drives the computer directly, then resumes it. The agent sees the `409 "session paused"` and waits instead of failing its run.
+
+## Wait and takeover
+
+```
+POST /v1/session/wait
+{"timeout_ms": 30000}
+```
+
+Long-polls until the lease is free or the timeout elapses (default 30 s, clamped to 1 s..5 min). Never acquires, only reports: `{"free":…, "session":…, "browser_running":…, "viewers":…, "apps_running":…, "uptime_s":…, "waited_ms":…}`. `free:true` still requires a separate acquire: another contender can take the lease between the wait returning and the acquire landing. A read, so no session is needed to call it.
+
+```
+POST /v1/session/takeover
+{"holder": {"kind": "agent", "name": "agent-run-43"}, "ttl_ms": 90000, "force": true}
+```
+
+Force-acquires the lease, evicting whoever holds it. Requires explicit `"force": true` in the body; without it, `400` (same for a missing `holder.name` or a `holder.kind` that is not `agent`/`user`). Success is `201` with the new session plus `evicted` — the evicted session, or `null` when none was held. The evicted holder is named in the activity log (`session.takeover` event) and in the response, so a takeover is always visible after the fact.
+
+Takeover is an explicit, logged, evicting operation, not a polite request. A holder that is taken over learns about it from the activity log / its next keepalive `409`, not from a push.
 
 ## Release
 
@@ -65,7 +89,7 @@ Returns the live session (or `null`) plus what a waiting caller needs to decide 
 GET /v1/session/events?since=N&limit=100
 ```
 
-An in-memory ring (cap 500, oldest drops first) of what happened on the computer: `session.acquired/released/expired/paused/resumed`, `shell.exec`, `files.write/delete/move/mkdir`, `apps.start/stop`, `browser.start/stop/navigate/act`, `health.degraded`. Each event has a monotonic `seq`, a timestamp, a `type`, an `actor` (the session holder's name, or `user`/`system`), and a human-readable `detail` — never secrets. Poll with `since` = the last `latest_seq` seen. The log is in-memory by design: dad is stateless across restarts, and the agent side persists what it needs. Display input is deliberately not logged — it is far too noisy.
+An in-memory ring (cap 500, oldest drops first) of what happened on the computer: `session.acquired/released/expired/paused/resumed/takeover`, `shell.exec`, `files.write/delete/move/mkdir`, `apps.start/stop`, `browser.start/stop/navigate/act`, `health.degraded`. Each event has a monotonic `seq`, a timestamp, a `type`, an `actor` (the session holder's name, or `user`/`system`), and a human-readable `detail` — never secrets. Poll with `since` = the last `latest_seq` seen. The log is in-memory by design: dad is stateless across restarts, and the agent side persists what it needs. Display input is deliberately not logged — it is far too noisy.
 
 ## Environment
 
@@ -76,4 +100,4 @@ An in-memory ring (cap 500, oldest drops first) of what happened on the computer
 ## What is NOT here
 
 - `/healthz` is container liveness only (bare `200`). It is not session health and is intentionally untouched. Real session health is `GET /v1/health` (see [api.md](api.md)).
-- There is no server-side queue, no priority, and no force-take. If a client wants a wait-your-turn UX, it builds the waiting there, on top of the `409` + holder body and `GET /v1/session`.
+- There is no server-side queue and no priority. Waiting is `POST /v1/session/wait`; force-taking is `POST /v1/session/takeover`, which is explicit and logged — see above.

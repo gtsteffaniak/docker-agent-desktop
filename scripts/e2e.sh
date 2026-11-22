@@ -39,15 +39,13 @@ done
 echo OK
 
 echo "== auth =="
-code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/apps")
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/apps")
 [[ "$code" == 401 ]] || fail "unauthenticated request returned $code, want 401"
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Dad-Token: wrong" "$BASE/api/apps")
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Dad-Token: wrong" "$BASE/v1/apps")
 [[ "$code" == 401 ]] || fail "wrong token returned $code, want 401"
-# Deprecated pre-rename header still authenticates.
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Computer-Token: $TOKEN" "$BASE/api/apps")
-[[ "$code" == 200 ]] || fail "legacy X-Computer-Token returned $code, want 200"
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Dad-Token: wrong" "$BASE/api/apps")
-[[ "$code" == 401 ]] || fail "wrong token returned $code, want 401"
+# The pre-rename header was removed with the /api surface: it must not authenticate.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Computer-Token: $TOKEN" "$BASE/v1/apps")
+[[ "$code" == 401 ]] || fail "legacy X-Computer-Token returned $code, want 401"
 echo OK
 
 echo "== desktop =="
@@ -63,8 +61,16 @@ for f in desktop.js desktop.css; do
 done
 echo OK
 
+echo "== acquire a session (one lease for the whole run) =="
+SID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e"}}' "$BASE/v1/session/acquire" \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+[[ -n "$SID" ]] || fail "session acquire returned no id"
+S=(-H "X-Dad-Session: $SID")
+echo OK
+
 echo "== app registry =="
-curl -sf "${H[@]}" "$BASE/api/apps" -o "$WORKDIR/apps.json" || fail "list apps"
+curl -sf "${H[@]}" "$BASE/v1/apps" -o "$WORKDIR/apps.json" || fail "list apps"
 python3 -I - "$WORKDIR/apps.json" <<'PY' || fail "registry should list terminal, editor, files and browser with ports"
 import json, sys
 apps = {a["id"]: a for a in json.load(open(sys.argv[1]))["apps"]}
@@ -72,12 +78,12 @@ assert apps["terminal"]["port"] == 8081 and apps["editor"]["port"] == 8083 and a
 assert apps["browser"]["port"] == 0, apps["browser"]
 print("apps", sorted(apps))
 PY
-code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST "$BASE/api/apps/start?id=not-registered")
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "${S[@]}" -X POST "$BASE/v1/apps/start?id=not-registered")
 [[ "$code" == 400 ]] || fail "unregistered app returned $code, want 400"
 
 echo "== start gtk apps and load each app page =="
 for app in terminal editor files; do
-  curl -sf "${H[@]}" -X POST "$BASE/api/apps/start?id=${app}" >/dev/null || fail "start $app"
+  curl -sf "${H[@]}" "${S[@]}" -X POST "$BASE/v1/apps/start?id=${app}" >/dev/null || fail "start $app"
 done
 for app in terminal editor files; do
   ok=0
@@ -94,7 +100,7 @@ echo "== cdp screencast =="
 # Chromium boots in the background: the frame route is 503 until its screencast is attached.
 ok=0
 for _ in $(seq 1 120); do
-  if curl -sf -m 30 "${H[@]}" "$BASE/api/browser/frame" -o "$WORKDIR/browser.jpg"; then ok=1; break; fi
+  if curl -sf -m 30 "${H[@]}" "$BASE/v1/browser/frame" -o "$WORKDIR/browser.jpg"; then ok=1; break; fi
   sleep 0.25
 done
 [[ $ok == 1 ]] || fail "browser frame"
@@ -104,41 +110,40 @@ d = open(sys.argv[1], 'rb').read()
 assert d[:2] == b'\xff\xd8' and len(d) > 500, len(d)
 print("jpeg_bytes", len(d))
 PY
-seq=$(curl -s -D - -o /dev/null "${H[@]}" "$BASE/api/browser/frame?since=0" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-seq"{print $2}')
+seq=$(curl -s -D - -o /dev/null "${H[@]}" "$BASE/v1/browser/frame?since=0" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-seq"{print $2}')
 [[ -n "$seq" && "$seq" -ge 1 ]] || fail "frame did not carry X-Frame-Seq"
-code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/api/browser/frame?since=$seq")
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/v1/browser/frame?since=$seq")
 [[ "$code" == 204 ]] || fail "no newer frame should return 204, got $code"
 echo OK
 
 echo "== browser navigation and address state =="
 # localhost resolves to the agent itself, so this needs no network access.
-curl -sf "${H[@]}" -H 'Content-Type: application/json' -d '{"url":"http://localhost:8080/healthz"}' \
-  "$BASE/api/browser/navigate" >/dev/null || fail "navigate"
+curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"url":"http://localhost:8080/healthz"}' \
+  "$BASE/v1/browser/navigate" >/dev/null || fail "navigate"
 url=""
 for _ in $(seq 1 40); do
-  url=$(curl -sf "${H[@]}" "$BASE/api/browser/state" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["url"])')
+  url=$(curl -sf "${H[@]}" "$BASE/v1/browser/state" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["url"])')
   [[ "$url" == *"/healthz" ]] && break
   sleep 0.25
 done
 [[ "$url" == *"/healthz" ]] || fail "state url should follow the navigation, got '$url'"
-code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' -d '{"url":"javascript:alert(1)"}' "$BASE/api/browser/navigate")
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"url":"javascript:alert(1)"}' "$BASE/v1/browser/navigate")
 [[ "$code" == 400 ]] || fail "javascript: URL returned $code, want 400"
-curl -sf "${H[@]}" -X POST "$BASE/api/browser/back" >/dev/null || fail "back"
+curl -sf "${H[@]}" "${S[@]}" -X POST "$BASE/v1/browser/back" >/dev/null || fail "back"
 echo OK
 
 echo "== v1 api: sessions, shell, files, health, apps, browser, display =="
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/v1/meta")
 [[ "$code" == 200 ]] || fail "v1/meta returned $code, want 200"
 curl -sf "${H[@]}" "$BASE/v1/meta" | grep -q '"api_version":"1"' || fail "v1/meta is not api_version 1"
-# Mutating calls without a session are 409.
+# Mutating calls without a session are 409, and the removed legacy session
+# header does not count as one.
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
   -d '{"command":"echo hi"}' "$BASE/v1/shell/exec")
 [[ "$code" == 409 ]] || fail "shell exec without a session returned $code, want 409"
-SID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
-  -d '{"holder":{"kind":"agent","name":"e2e"}}' "$BASE/v1/session/acquire" \
-  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[ -n "$SID" ]] || fail "session acquire returned no id"
-S=(-H "X-Dad-Session: $SID")
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H "X-Dc-Session: $SID" -H 'Content-Type: application/json' \
+  -d '{"command":"echo hi"}' "$BASE/v1/shell/exec")
+[[ "$code" == 409 ]] || fail "shell exec with only the legacy session header returned $code, want 409"
 curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d '{"command":"echo e2e-ok"}' \
   "$BASE/v1/shell/exec" | grep -q 'e2e-ok' || fail "shell exec did not echo"
 curl -sf "${H[@]}" "${S[@]}" -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
@@ -169,6 +174,34 @@ curl -sf "${H[@]}" -H 'Content-Type: application/json' -H 'Accept: application/j
   "$BASE/mcp" | grep -q '"result"' || fail "MCP initialize did not return a result"
 curl -sf "${H[@]}" "${S[@]}" -X POST -H 'Content-Type: application/json' -d "{\"session_id\":\"$SID\"}" \
   "$BASE/v1/session/release" >/dev/null || fail "session release"
+echo OK
+
+echo "== browser stream gate, wait and takeover =="
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/browser/stream")
+[[ "$code" == 401 ]] || fail "stream without a token returned $code, want 401"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" "$BASE/v1/browser/stream?session=ses_wrong")
+[[ "$code" == 409 ]] || fail "stream with an unknown session returned $code, want 409"
+# Wait reports the free lease immediately; takeover needs explicit force.
+curl -sf "${H[@]}" -H 'Content-Type: application/json' -d '{"timeout_ms":1000}' \
+  "$BASE/v1/session/wait" | grep -q '"free":true' || fail "wait on a free lease did not report free"
+HSID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e-holder"}}' "$BASE/v1/session/acquire" \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+[[ -n "$HSID" ]] || fail "holder acquire returned no id"
+curl -sf "${H[@]}" -H 'Content-Type: application/json' -d '{"timeout_ms":1000}' \
+  "$BASE/v1/session/wait" | grep -q '"free":false' || fail "wait on a held lease did not report held"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e-taker"},"force":false}' "$BASE/v1/session/takeover")
+[[ "$code" == 400 ]] || fail "takeover without force returned $code, want 400"
+TSID=$(curl -sf "${H[@]}" -H 'Content-Type: application/json' \
+  -d '{"holder":{"kind":"agent","name":"e2e-taker"},"force":true}' "$BASE/v1/session/takeover" \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["session"]["id"])')
+[[ -n "$TSID" ]] || fail "takeover returned no session id"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -H "X-Dad-Session: $HSID" -H 'Content-Type: application/json' \
+  -d '{"command":"echo hi"}' "$BASE/v1/shell/exec")
+[[ "$code" == 409 ]] || fail "evicted holder could still mutate: $code"
+curl -sf "${H[@]}" -H 'Content-Type: application/json' -d "{\"session_id\":\"$TSID\"}" \
+  "$BASE/v1/session/release" >/dev/null || fail "takeover session release"
 echo OK
 
 echo "== gtk app and broadway display processes running =="

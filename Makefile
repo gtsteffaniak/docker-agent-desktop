@@ -9,12 +9,12 @@ DOCKER_RUN := $(DOCKER) run --rm -v /var/run/docker.sock:/var/run/docker.sock
 DIVE       := $(DOCKER_RUN) -v $(CURDIR)/.dive-ci:/.dive-ci:ro -v $(CURDIR)/.build:/out wagoodman/dive:latest
 HADOLINT   := $(DOCKER) run --rm -v $(CURDIR):/src:ro -w /src ghcr.io/hadolint/hadolint hadolint --config /src/.hadolint.yaml
 
-.PHONY: help gate lint hadolint unit build e2e budgets dive tidy bump-base dev dev-stop dev-logs
+.PHONY: help gate lint hadolint unit build e2e budgets dive tidy bump-base dev dev-stop dev-logs swagger
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
-gate: lint unit build e2e budgets dive ## Run every check (lint, unit, build, e2e, budgets, dive)
+gate: lint swagger unit build e2e budgets dive ## Run every check (lint, unit, build, e2e, budgets, dive)
 
 lint: hadolint ## gofmt, go vet, shellcheck, node --check and hadolint
 	@test -z "$$(gofmt -l . | grep -v '^$$')" || (echo "gofmt needed"; gofmt -l .; exit 1)
@@ -35,6 +35,9 @@ unit: ## Run unit tests with the race detector
 
 tidy: ## Tidy go.mod and go.sum
 	go mod tidy
+
+swagger: ## Regenerate the OpenAPI spec from the swag annotations (never hand-edit cmd/dad/docs/)
+	go run github.com/swaggo/swag/cmd/swag@v1.16.4 init --generalInfo main.go --dir ./cmd/dad --output ./cmd/dad/docs --parseDependency --parseInternal
 
 build: ## Build the container image
 	$(DOCKER) build -f docker/Dockerfile -t $(IMAGE) .

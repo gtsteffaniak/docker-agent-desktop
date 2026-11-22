@@ -1,0 +1,2487 @@
+definitions:
+  main.ActivityEvent:
+    properties:
+      actor:
+        type: string
+      detail:
+        type: string
+      seq:
+        type: integer
+      ts:
+        type: string
+      type:
+        type: string
+    type: object
+  main.FileEntry:
+    properties:
+      mod_time:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      size:
+        type: integer
+      type:
+        description: file | dir
+        type: string
+    type: object
+  main.Session:
+    properties:
+      acquired_at:
+        type: string
+      expires_at:
+        type: string
+      holder:
+        $ref: '#/definitions/main.SessionHolder'
+      id:
+        type: string
+      paused:
+        type: boolean
+    type: object
+  main.SessionHolder:
+    properties:
+      kind:
+        description: '"agent" or "user"'
+        type: string
+      name:
+        type: string
+      run_id:
+        type: string
+    type: object
+  main.ShellExecRequest:
+    properties:
+      argv:
+        items:
+          type: string
+        type: array
+      background:
+        type: boolean
+      command:
+        type: string
+      cwd:
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      timeout_ms:
+        type: integer
+    type: object
+  main.ShellExecResult:
+    properties:
+      duration_ms:
+        type: integer
+      exit_code:
+        type: integer
+      job_id:
+        type: string
+      status:
+        description: completed | running | killed | failed | timeout
+        type: string
+      stderr:
+        type: string
+      stdout:
+        type: string
+      timed_out:
+        type: boolean
+    type: object
+  main.actErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  main.apiVersionResponse:
+    properties:
+      api_version:
+        example: "1"
+        type: string
+    type: object
+  main.appStartResponse:
+    properties:
+      id:
+        type: string
+      running:
+        type: boolean
+    type: object
+  main.appStopResponse:
+    properties:
+      id:
+        type: string
+      running:
+        type: boolean
+    type: object
+  main.appV1:
+    properties:
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      order:
+        type: integer
+      port:
+        type: integer
+      running:
+        type: boolean
+    type: object
+  main.appsListResponse:
+    properties:
+      apps:
+        items:
+          $ref: '#/definitions/main.appV1'
+        type: array
+    type: object
+  main.browserActRequest:
+    properties:
+      button:
+        type: integer
+      clicks:
+        type: integer
+      dx:
+        type: number
+      dy:
+        type: number
+      key:
+        type: string
+      kind:
+        type: string
+      selector:
+        type: string
+      text:
+        type: string
+      x:
+        type: number
+      "y":
+        type: number
+    type: object
+  main.browserEvaluateRequest:
+    properties:
+      expression:
+        type: string
+    type: object
+  main.browserEvaluateResponse:
+    properties:
+      value: {}
+    type: object
+  main.browserInputRequest:
+    properties:
+      action:
+        type: string
+      button:
+        type: integer
+      buttons:
+        type: integer
+      clicks:
+        type: integer
+      code:
+        type: string
+      dx:
+        type: number
+      dy:
+        type: number
+      key:
+        type: string
+      mods:
+        type: integer
+      text:
+        type: string
+      type:
+        description: pointer | key | scroll | paste
+        type: string
+      x:
+        type: number
+      "y":
+        type: number
+    type: object
+  main.browserNavigateRequest:
+    properties:
+      url:
+        type: string
+    type: object
+  main.browserNavigateResponse:
+    properties:
+      url:
+        type: string
+    type: object
+  main.browserRunningResponse:
+    properties:
+      running:
+        type: boolean
+    type: object
+  main.browserSizeRequest:
+    properties:
+      h:
+        type: integer
+      scale:
+        type: number
+      w:
+        type: integer
+    type: object
+  main.browserStateOut:
+    properties:
+      can_back:
+        type: boolean
+      can_forward:
+        type: boolean
+      running:
+        type: boolean
+      seq:
+        description: Seq increases whenever any other field changes, so callers can
+          detect updates cheaply.
+        type: integer
+      title:
+        type: string
+      url:
+        type: string
+    type: object
+  main.browserTextResponse:
+    properties:
+      text:
+        type: string
+    type: object
+  main.displayClickRequest:
+    properties:
+      button:
+        type: integer
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  main.displayDragRequest:
+    properties:
+      x1:
+        type: integer
+      x2:
+        type: integer
+      y1:
+        type: integer
+      y2:
+        type: integer
+    type: object
+  main.displayKeyRequest:
+    properties:
+      key:
+        type: string
+      mods:
+        type: integer
+    type: object
+  main.displayScrollRequest:
+    properties:
+      dx:
+        type: integer
+      dy:
+        type: integer
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  main.displayTypeRequest:
+    properties:
+      text:
+        type: string
+    type: object
+  main.fileMkdirRequest:
+    properties:
+      path:
+        type: string
+    type: object
+  main.fileMoveRequest:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    type: object
+  main.fileMoveResponse:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    type: object
+  main.filePathResponse:
+    properties:
+      path:
+        type: string
+    type: object
+  main.fileWriteRequest:
+    properties:
+      content:
+        type: string
+      encoding:
+        description: text (default) | base64
+        type: string
+      path:
+        type: string
+    type: object
+  main.fileWriteResponse:
+    properties:
+      path:
+        type: string
+      size:
+        type: integer
+    type: object
+  main.filesListResponse:
+    properties:
+      entries:
+        items:
+          $ref: '#/definitions/main.FileEntry'
+        type: array
+      path:
+        type: string
+    type: object
+  main.healthChecks:
+    properties:
+      agent:
+        type: string
+      broadway:
+        type: string
+      chromium:
+        type: string
+      disk:
+        type: string
+      disk_free_bytes:
+        type: integer
+      session:
+        $ref: '#/definitions/main.healthSessionCheck'
+    type: object
+  main.healthResponse:
+    properties:
+      checks:
+        $ref: '#/definitions/main.healthChecks'
+      status:
+        type: string
+      uptime_s:
+        type: integer
+    type: object
+  main.healthSessionCheck:
+    properties:
+      expires_in_s:
+        type: integer
+      held:
+        type: boolean
+      holder:
+        $ref: '#/definitions/main.SessionHolder'
+      paused:
+        type: boolean
+    type: object
+  main.mcpJSONRPCError:
+    properties:
+      code:
+        type: integer
+      message:
+        type: string
+    type: object
+  main.mcpJSONRPCRequest:
+    properties:
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      method:
+        example: tools/call
+        type: string
+      params: {}
+    type: object
+  main.mcpJSONRPCResponse:
+    properties:
+      error:
+        $ref: '#/definitions/main.mcpJSONRPCError'
+      id: {}
+      jsonrpc:
+        example: "2.0"
+        type: string
+      result: {}
+    type: object
+  main.sessionAcquireRequest:
+    properties:
+      holder:
+        $ref: '#/definitions/main.SessionHolder'
+      ttl_ms:
+        type: integer
+    type: object
+  main.sessionError:
+    properties:
+      error:
+        type: string
+      expires_at:
+        type: string
+      holder:
+        $ref: '#/definitions/main.SessionHolder'
+      paused:
+        type: boolean
+    type: object
+  main.sessionEventsResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/main.ActivityEvent'
+        type: array
+      latest_seq:
+        type: integer
+    type: object
+  main.sessionGetResponse:
+    properties:
+      apps_running:
+        items:
+          type: string
+        type: array
+      browser_running:
+        type: boolean
+      session:
+        $ref: '#/definitions/main.Session'
+      uptime_s:
+        type: integer
+      viewers:
+        type: integer
+    type: object
+  main.sessionIDRequest:
+    properties:
+      session_id:
+        type: string
+    type: object
+  main.sessionReleaseResponse:
+    properties:
+      released:
+        type: boolean
+    type: object
+  main.sessionTakeoverRequest:
+    properties:
+      force:
+        type: boolean
+      holder:
+        $ref: '#/definitions/main.SessionHolder'
+      ttl_ms:
+        type: integer
+    type: object
+  main.sessionTakeoverResponse:
+    properties:
+      evicted:
+        $ref: '#/definitions/main.Session'
+      session:
+        $ref: '#/definitions/main.Session'
+    type: object
+  main.sessionWaitRequest:
+    properties:
+      timeout_ms:
+        type: integer
+    type: object
+  main.sessionWaitResponse:
+    properties:
+      apps_running:
+        items:
+          type: string
+        type: array
+      browser_running:
+        type: boolean
+      free:
+        type: boolean
+      session:
+        $ref: '#/definitions/main.Session'
+      uptime_s:
+        type: integer
+      viewers:
+        type: integer
+      waited_ms:
+        type: integer
+    type: object
+  main.shellJobsResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/main.ShellExecResult'
+        type: array
+    type: object
+info:
+  contact: {}
+  description: 'The stable /v1 API of docker-agent-desktop: shell, files, browser,
+    display, apps, sessions, health and the activity log, plus the MCP Streamable
+    HTTP endpoint. There is no unversioned /api surface: it was removed in the initial
+    release, together with the pre-rename auth names, rather than deprecated.'
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  title: Docker Agent Desktop API
+  version: "1"
+paths:
+  /healthz:
+    get:
+      description: 'Bare 200. Container liveness only, not session health: use GET
+        /v1/health for whether the session is actually usable.'
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Alive
+      summary: Container liveness
+      tags:
+      - meta
+  /mcp:
+    post:
+      consumes:
+      - application/json
+      description: The Model Context Protocol surface, served as Streamable HTTP (JSON-RPC
+        2.0, stateless). Every tool calls the same Agent service methods the /v1 HTTP
+        handlers call — never an HTTP round-trip to self. Mutating tools enforce the
+        session rule in-process (live session required, id must match, session must
+        not be paused); reads never require a session. See docs/mcp.md for the tool
+        list.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: JSON-RPC 2.0 request (initialize, tools/list, tools/call, …)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.mcpJSONRPCRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JSON-RPC 2.0 response
+          schema:
+            $ref: '#/definitions/main.mcpJSONRPCResponse'
+        "400":
+          description: Not a JSON-RPC request, or a non-POST method
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "405":
+          description: Only POST is served
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: MCP endpoint
+      tags:
+      - mcp
+  /v1/apps:
+    get:
+      description: Lists the registry apps with whether each is running. The browser
+        (port 0) is running when its screencast is attached.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Registry apps
+          schema:
+            $ref: '#/definitions/main.appsListResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: List apps
+      tags:
+      - apps
+  /v1/apps/start:
+    post:
+      description: 'Starts one registry app: its Broadway display first, then the
+        app. Starting an app that is already running does nothing. The browser (port
+        0) has no process to start; this reports whether Chromium is running instead.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Registry app id
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: App started (or already running)
+          schema:
+            $ref: '#/definitions/main.appStartResponse'
+        "400":
+          description: Unknown app id
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "500":
+          description: App start failed
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Start an app
+      tags:
+      - apps
+  /v1/apps/stop:
+    post:
+      description: Stops one registry app and reports it as not running. Unknown ids
+        are a 400, mirroring start. The browser (port 0) has no app process, so stopping
+        it stops Chromium. The app's broadwayd display stays running for reuse.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Registry app id
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: App stopped
+          schema:
+            $ref: '#/definitions/main.appStopResponse'
+        "400":
+          description: Unknown app id
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "500":
+          description: App stop failed
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Stop an app
+      tags:
+      - apps
+  /v1/browser/act:
+    post:
+      consumes:
+      - application/json
+      description: 'Performs one high-level browser action: click, type, select, scroll
+        or key. Click and scroll take a selector (resolved to its centre) or x/y coordinates;
+        type and select take a selector plus text; key takes a key name. A selector
+        that matches nothing is a 404.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Action to perform
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.browserActRequest'
+      responses:
+        "204":
+          description: Action performed
+        "400":
+          description: Unknown act kind, or select/key missing what they need
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Selector matched nothing
+          schema:
+            $ref: '#/definitions/main.actErrorResponse'
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Action failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser action
+      tags:
+      - browser
+  /v1/browser/back:
+    post:
+      description: Goes back in the page history.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Went back
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Navigation failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser back
+      tags:
+      - browser
+  /v1/browser/evaluate:
+    post:
+      consumes:
+      - application/json
+      description: Runs one JavaScript expression in the page and returns its value
+        as raw JSON (undefined, functions and other values with no JSON form become
+        null). The expression is capped at 64 KiB.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Expression to evaluate
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.browserEvaluateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Expression value
+          schema:
+            $ref: '#/definitions/main.browserEvaluateResponse'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Evaluation failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Evaluate JavaScript in the page
+      tags:
+      - browser
+  /v1/browser/forward:
+    post:
+      description: Goes forward in the page history.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Went forward
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Navigation failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser forward
+      tags:
+      - browser
+  /v1/browser/frame:
+    get:
+      description: 'One frame of the page. Without ?since it takes a fresh screenshot
+        (JPEG by default, PNG with ?format=png). With ?since=N it serves the screencast
+        for a polling client: 204 when no frame newer than N exists. The X-Frame-Seq
+        header carries the frame sequence number to poll with next.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Image format
+        enum:
+        - jpeg
+        - png
+        in: query
+        name: format
+        type: string
+      - description: 'Poll: only a frame newer than this sequence number (JPEG only)'
+        in: query
+        name: since
+        type: integer
+      produces:
+      - image/jpeg
+      - image/png
+      responses:
+        "200":
+          description: Frame image
+          headers:
+            X-Frame-Seq:
+              description: Sequence number of the frame
+              type: string
+          schema:
+            type: file
+        "204":
+          description: No frame newer than ?since=
+        "400":
+          description: Unknown format, or since polling with format=png
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+        "504":
+          description: Screenshot timed out
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser frame
+      tags:
+      - browser
+  /v1/browser/input:
+    post:
+      consumes:
+      - application/json
+      description: 'Forwards one pointer, scroll, key or paste event to the page.
+        Which fields apply depends on type: pointer takes action/x/y/button/buttons/clicks/mods,
+        key takes action/key/code/text/mods, scroll takes x/y/dx/dy/mods, paste takes
+        text.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: One input event
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.browserInputRequest'
+      responses:
+        "204":
+          description: Input delivered
+        "400":
+          description: Unparsable body, or unknown input type
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Input failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Send browser input
+      tags:
+      - browser
+  /v1/browser/navigate:
+    post:
+      consumes:
+      - application/json
+      description: Navigates the page. Navigating is what starts Chromium, so the
+        first address starts it. The reply is the normalized URL that was navigated
+        to.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: URL to navigate to
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.browserNavigateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Normalized URL navigated to
+          schema:
+            $ref: '#/definitions/main.browserNavigateResponse'
+        "400":
+          description: Unparsable body, or unusable URL
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Navigation failed
+          schema:
+            type: string
+        "503":
+          description: Chromium could not start
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Navigate the browser
+      tags:
+      - browser
+  /v1/browser/reload:
+    post:
+      description: Reloads the page.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Reloaded
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Navigation failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Reload the browser
+      tags:
+      - browser
+  /v1/browser/size:
+    post:
+      consumes:
+      - application/json
+      description: Sets the browser viewport size (CSS pixels, with the device pixel
+        ratio as scale).
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Viewport width, height and scale
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.browserSizeRequest'
+      responses:
+        "204":
+          description: Viewport resized
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "502":
+          description: Resize failed
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Set browser viewport size
+      tags:
+      - browser
+  /v1/browser/start:
+    post:
+      description: Starts Chromium on first use and reports whether it is running.
+        Starting an already-running browser does nothing.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Browser running
+          schema:
+            $ref: '#/definitions/main.browserRunningResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Chromium could not start
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Start the browser
+      tags:
+      - browser
+  /v1/browser/state:
+    get:
+      description: The page's real URL, title and history availability. ?fmt=lines
+        returns a plain text form (url, title, back=0|1, forward=0|1, seq=N, one per
+        line). Chromium not running yet is running=false, not an error.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Plain-text form
+        enum:
+        - lines
+        in: query
+        name: fmt
+        type: string
+      produces:
+      - application/json
+      - text/plain
+      responses:
+        "200":
+          description: Navigation state
+          schema:
+            $ref: '#/definitions/main.browserStateOut'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser state
+      tags:
+      - browser
+  /v1/browser/stop:
+    post:
+      description: Stops Chromium. The next navigation starts it again.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Browser stopped
+          schema:
+            $ref: '#/definitions/main.browserRunningResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Stop the browser
+      tags:
+      - browser
+  /v1/browser/stream:
+    get:
+      description: 'The live browser socket: binary JPEG frames and navigation-state
+        messages pumped down, navigate/pointer/key/scroll/paste/size commands read
+        in order. A WebSocket cannot carry the X-Dad-Session header, so the session
+        travels as ?session=<id> at connect, or a {"type":"session","session_id":"..."}
+        message that (re)binds the socket mid-connection. Frames and state flow without
+        a session (reads); every control message is refused while no live, unpaused
+        session is bound. A ?session= naming no live session is a 409 at connect time.
+        Control messages carrying an "id" get an {"type":"ack","id","ok","error"}
+        reply.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id to bind at connect (control messages need a live,
+          unpaused session bound)
+        in: query
+        name: session
+        type: string
+      responses:
+        "101":
+          description: Switched to the WebSocket protocol
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: ?session= names no live session
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Browser live stream
+      tags:
+      - browser
+  /v1/browser/text:
+    get:
+      description: Returns the page's visible text.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Visible text
+          schema:
+            $ref: '#/definitions/main.browserTextResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "502":
+          description: Could not read the page
+          schema:
+            type: string
+        "503":
+          description: Chromium not running
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Browser page text
+      tags:
+      - browser
+  /v1/display/click:
+    post:
+      consumes:
+      - application/json
+      description: Clicks at root display coordinates. Button defaults to left (1);
+        2 is middle, 3 is right.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Click coordinates and button
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.displayClickRequest'
+      responses:
+        "204":
+          description: Clicked
+        "400":
+          description: Unparsable body, or button not 1..3
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Display unavailable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Click at display coordinates
+      tags:
+      - display
+  /v1/display/drag:
+    post:
+      consumes:
+      - application/json
+      description: Drags with the left button from (x1, y1) to (x2, y2).
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Drag start and end coordinates
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.displayDragRequest'
+      responses:
+        "204":
+          description: Dragged
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Display unavailable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Drag on the display
+      tags:
+      - display
+  /v1/display/key:
+    post:
+      consumes:
+      - application/json
+      description: 'Presses and releases one key by name (Return, Tab, Escape, arrows,
+        F1–F12, single characters). Mods are GDK modifier masks: Shift 1, Control
+        4, Alt 8.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Key name and modifiers
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.displayKeyRequest'
+      responses:
+        "204":
+          description: Key pressed
+        "400":
+          description: Unparsable body, or unknown key
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Display unavailable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Press a key
+      tags:
+      - display
+  /v1/display/meta:
+    get:
+      description: 'Raw Broadway debug JSON (display size, connection state). Free-form:
+        the shape is Broadway''s, not this API''s.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Broadway debug state
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Display debug state
+      tags:
+      - display
+  /v1/display/screenshot:
+    get:
+      description: The current display frame as a PNG. With ?wait=1 it waits up to
+        15 s for a fresh frame first.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Wait for a fresh frame first
+        enum:
+        - "1"
+        in: query
+        name: wait
+        type: string
+      produces:
+      - image/png
+      responses:
+        "200":
+          description: PNG image
+          schema:
+            type: file
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "500":
+          description: Screenshot failed
+          schema:
+            type: string
+        "504":
+          description: No frame within the wait
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Display screenshot
+      tags:
+      - display
+  /v1/display/scroll:
+    post:
+      consumes:
+      - application/json
+      description: 'Scrolls vertically at root display coordinates. dx is ignored:
+        horizontal scrolling is not supported by the Broadway encoder.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Scroll coordinates and deltas
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.displayScrollRequest'
+      responses:
+        "204":
+          description: Scrolled
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Display unavailable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Scroll at display coordinates
+      tags:
+      - display
+  /v1/display/type:
+    post:
+      consumes:
+      - application/json
+      description: Types text into the focused window.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Text to type
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.displayTypeRequest'
+      responses:
+        "204":
+          description: Typed
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "503":
+          description: Display unavailable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Type text
+      tags:
+      - display
+  /v1/files:
+    delete:
+      description: Removes a file or directory. Directories need recursive=true unless
+        empty. The home directory itself can never be deleted. A final symlink is
+        removed itself, never its target.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Home-relative path to delete
+        in: query
+        name: path
+        required: true
+        type: string
+      - description: Recursively delete a non-empty directory
+        enum:
+        - "1"
+        - "true"
+        in: query
+        name: recursive
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted path
+          schema:
+            $ref: '#/definitions/main.filePathResponse'
+        "400":
+          description: Path missing, escapes the jail, is home itself, or a non-empty
+            directory without recursive
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Path not found
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete a file or directory
+      tags:
+      - files
+  /v1/files/list:
+    get:
+      description: Lists one jailed directory. ?path= is home-relative (empty means
+        home). Paths are home-relative in the reply.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Home-relative directory (empty means home)
+        in: query
+        name: path
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Directory listing
+          schema:
+            $ref: '#/definitions/main.filesListResponse'
+        "400":
+          description: Path escapes the home jail
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Directory not found
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: List files
+      tags:
+      - files
+  /v1/files/mkdir:
+    post:
+      consumes:
+      - application/json
+      description: Creates a directory and its parents, jailed under home.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Directory path
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.fileMkdirRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created path
+          schema:
+            $ref: '#/definitions/main.filePathResponse'
+        "400":
+          description: Path missing or escapes the jail
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Make a directory
+      tags:
+      - files
+  /v1/files/move:
+    post:
+      consumes:
+      - application/json
+      description: Renames within the jail. The destination must not already exist.
+        Deleting or moving the home directory itself is refused.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Source and destination paths
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.fileMoveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Moved paths
+          schema:
+            $ref: '#/definitions/main.fileMoveResponse'
+        "400":
+          description: from/to missing, path escapes the jail, destination exists,
+            or home itself
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Source not found
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Move or rename a file
+      tags:
+      - files
+  /v1/files/read:
+    get:
+      description: Returns one file's bytes, capped at 10 MiB. ?download=1 adds a
+        Content-Disposition attachment header.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Home-relative file path
+        in: query
+        name: path
+        required: true
+        type: string
+      - description: Send as a download attachment
+        enum:
+        - "1"
+        in: query
+        name: download
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: File bytes
+          schema:
+            type: file
+        "400":
+          description: Path escapes the home jail, or is a directory
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: File not found
+          schema:
+            type: string
+        "413":
+          description: File exceeds the 10 MiB limit
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Read a file
+      tags:
+      - files
+  /v1/files/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Writes one multipart file (field "file") to the "path" form field.
+        A trailing slash (or an existing directory) means "into this directory". The
+        whole body is bounded, so an oversized upload cannot fill the disk with multipart
+        temp files.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: File to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Home-relative destination path (or directory)
+        in: formData
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Written path and byte count
+          schema:
+            $ref: '#/definitions/main.fileWriteResponse'
+        "400":
+          description: Missing file/path fields, or path escapes the jail
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "413":
+          description: File exceeds the 10 MiB limit
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Upload a file
+      tags:
+      - files
+  /v1/files/write:
+    post:
+      consumes:
+      - application/json
+      description: Writes data, creating parent directories as needed. Content over
+        10 MiB is refused, so everything written can be read back. Encoding "text"
+        (default) writes the content as-is; "base64" decodes it first.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Path, content and encoding
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.fileWriteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Written path and byte count
+          schema:
+            $ref: '#/definitions/main.fileWriteResponse'
+        "400":
+          description: Path missing, path escapes the jail, or bad encoding/base64
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "413":
+          description: Content exceeds the 10 MiB limit
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Write a file
+      tags:
+      - files
+  /v1/health:
+    get:
+      description: 'The real health check: whether the session is actually usable.
+        Probes Chromium, Broadway, disk space and the session lease, and reports each
+        piece, so a caller can tell a dead browser from a dead display from a full
+        disk instead of getting one opaque 503. A transition into degraded is recorded
+        once in the activity log.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health, ok or degraded
+          schema:
+            $ref: '#/definitions/main.healthResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Session health
+      tags:
+      - health
+  /v1/meta:
+    get:
+      description: Unauthenticated. Returns the API version ("1").
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: API version
+          schema:
+            $ref: '#/definitions/main.apiVersionResponse'
+      summary: API version
+      tags:
+      - meta
+  /v1/session:
+    get:
+      description: 'The live session (or null) plus browser state, viewer count, running
+        apps and uptime: what a waiting caller needs to decide whether to wait.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Current state
+          schema:
+            $ref: '#/definitions/main.sessionGetResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Current session state
+      tags:
+      - session
+  /v1/session/acquire:
+    post:
+      consumes:
+      - application/json
+      description: 'Acquires the single session lease. Exactly one holder at a time:
+        a second acquire is a 409 naming the current holder. The lease TTL defaults
+        to 90 s (DAD_SESSION_LEASE_MS, clamped to 10 s..10 min); keep it alive with
+        POST /v1/session/keepalive.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Holder and optional lease TTL
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionAcquireRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Lease acquired
+          schema:
+            $ref: '#/definitions/main.Session'
+        "400":
+          description: holder.name missing or holder.kind not agent/user
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: Session already held
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Acquire the session
+      tags:
+      - session
+  /v1/session/events:
+    get:
+      description: Activity-log events with sequence number greater than ?since=,
+        up to ?limit= (default 100, max 500). Poll with the latest_seq returned to
+        follow the log.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Only events with seq greater than this
+        in: query
+        name: since
+        type: integer
+      - description: Maximum events to return (default 100, max 500)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Events and the latest sequence number
+          schema:
+            $ref: '#/definitions/main.sessionEventsResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Activity log events
+      tags:
+      - events
+  /v1/session/keepalive:
+    post:
+      consumes:
+      - application/json
+      description: 'Extends the lease on a live session. A keepalive for an expired,
+        released or taken-over session is a 409: re-acquire instead.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Lease extended
+          schema:
+            $ref: '#/definitions/main.Session'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No such session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Keep the session alive
+      tags:
+      - session
+  /v1/session/pause:
+    post:
+      consumes:
+      - application/json
+      description: Pauses or resumes the live session. While paused, control messages
+        are refused but the lease is still held. A pause/resume for a session that
+        is not the live one is a 409.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Session paused or resumed
+          schema:
+            $ref: '#/definitions/main.Session'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No such session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Pause or resume the session
+      tags:
+      - session
+  /v1/session/release:
+    post:
+      consumes:
+      - application/json
+      description: Releases a live session. Releasing a session that is not held is
+        a 404.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Released
+          schema:
+            $ref: '#/definitions/main.sessionReleaseResponse'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: No such session
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Release the session
+      tags:
+      - session
+  /v1/session/resume:
+    post:
+      consumes:
+      - application/json
+      description: Pauses or resumes the live session. While paused, control messages
+        are refused but the lease is still held. A pause/resume for a session that
+        is not the live one is a 409.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Session paused or resumed
+          schema:
+            $ref: '#/definitions/main.Session'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No such session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Pause or resume the session
+      tags:
+      - session
+  /v1/session/takeover:
+    post:
+      consumes:
+      - application/json
+      description: 'Force-acquires the lease, evicting whoever holds it. Requires
+        explicit "force": true — evicting another holder is deliberate, never accidental.
+        The evicted holder is named in the activity log and in the response, so a
+        takeover is always visible after the fact.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: New holder, with force=true
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.sessionTakeoverRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: New session and the evicted one (or null)
+          schema:
+            $ref: '#/definitions/main.sessionTakeoverResponse'
+        "400":
+          description: force is not true, or holder.name missing / holder.kind not
+            agent/user
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Take over the session
+      tags:
+      - session
+  /v1/session/wait:
+    post:
+      consumes:
+      - application/json
+      description: 'Long-polls until the lease is free or the timeout elapses (default
+        30 s, clamped to 1 s..5 min). It never acquires: it only reports. A caller
+        that sees free=true still has to acquire — another contender can take the
+        lease between the wait returning and the acquire landing. A read, so no session
+        is needed to call it.'
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Optional wait timeout
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/main.sessionWaitRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Wait result
+          schema:
+            $ref: '#/definitions/main.sessionWaitResponse'
+        "400":
+          description: Unparsable body
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Wait for the session to free up
+      tags:
+      - session
+  /v1/shell/exec:
+    post:
+      consumes:
+      - application/json
+      description: Runs one command. Exactly one of command (/bin/sh -c) or argv (direct
+        exec) must be set. Synchronously unless background=true, in which case it
+        starts the process and returns immediately with status "running" and a job
+        id to poll. Non-zero exits are results with status "failed", not errors. Output
+        is capped at 1 MiB per stream.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Command to run
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.ShellExecRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Execution result (or a running job)
+          schema:
+            $ref: '#/definitions/main.ShellExecResult'
+        "400":
+          description: Neither or both of command/argv set
+          schema:
+            type: string
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+        "429":
+          description: Too many running shell jobs
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Run a shell command
+      tags:
+      - shell
+  /v1/shell/jobs:
+    get:
+      description: All tracked jobs, oldest first. A running job reports the output
+        captured so far and its elapsed time.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tracked jobs
+          schema:
+            $ref: '#/definitions/main.shellJobsResponse'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: List shell jobs
+      tags:
+      - shell
+  /v1/shell/jobs/{id}:
+    get:
+      description: One job's current result. A running job reports the output captured
+        so far and its elapsed time.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Job id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Job result
+          schema:
+            $ref: '#/definitions/main.ShellExecResult'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Unknown job
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Get a shell job
+      tags:
+      - shell
+  /v1/shell/jobs/{id}/kill:
+    post:
+      description: SIGKILLs a running job's whole process group (children included).
+        Waits briefly for the waiter to finalize the result, so the response reflects
+        the kill.
+      parameters:
+      - description: Agent token (or the dad_token cookie)
+        in: header
+        name: X-Dad-Token
+        type: string
+      - description: Session id of the live session
+        in: header
+        name: X-Dad-Session
+        required: true
+        type: string
+      - description: Job id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Finalized job result
+          schema:
+            $ref: '#/definitions/main.ShellExecResult'
+        "401":
+          description: Missing or wrong token
+          schema:
+            type: string
+        "404":
+          description: Unknown or already-finished job
+          schema:
+            type: string
+        "409":
+          description: No live session, or held by someone else
+          schema:
+            $ref: '#/definitions/main.sessionError'
+      security:
+      - ApiKeyAuth: []
+      summary: Kill a shell job
+      tags:
+      - shell
+securityDefinitions:
+  ApiKeyAuth:
+    description: Agent token, set from DAD_TOKEN. The dad_token portal cookie is accepted
+      as an alternative.
+    in: header
+    name: X-Dad-Token
+    type: apiKey
+swagger: "2.0"

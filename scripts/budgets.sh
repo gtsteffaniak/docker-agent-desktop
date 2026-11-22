@@ -78,7 +78,7 @@ $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
   "$IMAGE" >/dev/null
 port=$(wait_healthy "$NAME") || { echo "FAIL container never became healthy"; exit 1; }
 for _ in $(seq 1 100); do
-  if curl -sf -m 5 -H "X-Dad-Token: $TOKEN" "http://127.0.0.1:${port}/api/browser/frame" >/dev/null 2>&1; then
+  if curl -sf -m 5 -H "X-Dad-Token: $TOKEN" "http://127.0.0.1:${port}/v1/browser/frame" >/dev/null 2>&1; then
     break
   fi
   sleep 0.15

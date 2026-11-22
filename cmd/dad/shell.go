@@ -409,6 +409,28 @@ func shellDisplay(req ShellExecRequest) string {
 	return strings.Join(req.Argv, " ")
 }
 
+// shellJobsResponse is the GET /v1/shell/jobs body.
+type shellJobsResponse struct {
+	Jobs []ShellExecResult `json:"jobs"`
+}
+
+// handleShellExec runs one command: synchronously unless background=true, in which case it
+// starts the process and returns immediately with status "running".
+// @Summary Run a shell command
+// @Description Runs one command. Exactly one of command (/bin/sh -c) or argv (direct exec) must be set. Synchronously unless background=true, in which case it starts the process and returns immediately with status "running" and a job id to poll. Non-zero exits are results with status "failed", not errors. Output is capped at 1 MiB per stream.
+// @Tags shell
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body ShellExecRequest true "Command to run"
+// @Success 200 {object} ShellExecResult "Execution result (or a running job)"
+// @Failure 400 {string} string "Neither or both of command/argv set"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 429 {string} string "Too many running shell jobs"
+// @Security ApiKeyAuth
+// @Router /v1/shell/exec [post]
 func (a *Agent) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	var req ShellExecRequest
 	if !decodeJSON(w, r, 1<<20, &req) {
@@ -435,10 +457,33 @@ func (a *Agent) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+// handleShellJobs lists all tracked jobs, oldest first. A running job reports the output
+// captured so far.
+// @Summary List shell jobs
+// @Description All tracked jobs, oldest first. A running job reports the output captured so far and its elapsed time.
+// @Tags shell
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Success 200 {object} shellJobsResponse "Tracked jobs"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Security ApiKeyAuth
+// @Router /v1/shell/jobs [get]
 func (a *Agent) handleShellJobs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"jobs": a.listShellJobs()})
+	writeJSON(w, shellJobsResponse{Jobs: a.listShellJobs()})
 }
 
+// handleShellJob returns one job's current result.
+// @Summary Get a shell job
+// @Description One job's current result. A running job reports the output captured so far and its elapsed time.
+// @Tags shell
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param id path string true "Job id"
+// @Success 200 {object} ShellExecResult "Job result"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "Unknown job"
+// @Security ApiKeyAuth
+// @Router /v1/shell/jobs/{id} [get]
 func (a *Agent) handleShellJob(w http.ResponseWriter, r *http.Request) {
 	res, ok := a.shellJob(r.PathValue("id"))
 	if !ok {
@@ -448,6 +493,21 @@ func (a *Agent) handleShellJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+// handleShellJobKill SIGKILLs a running job's whole process group. It waits briefly for the
+// waiter goroutine to finalize the result so the response reflects the kill.
+// @Summary Kill a shell job
+// @Description SIGKILLs a running job's whole process group (children included). Waits briefly for the waiter to finalize the result, so the response reflects the kill.
+// @Tags shell
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param id path string true "Job id"
+// @Success 200 {object} ShellExecResult "Finalized job result"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "Unknown or already-finished job"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Security ApiKeyAuth
+// @Router /v1/shell/jobs/{id}/kill [post]
 func (a *Agent) handleShellJobKill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !a.killShellJob(id) {
@@ -473,8 +533,8 @@ func (a *Agent) handleShellJobKill(w http.ResponseWriter, r *http.Request) {
 // registerShellRoutes mounts the shell endpoints. Mutating routes are
 // session-gated (auth first, then requireSession).
 func (a *Agent) registerShellRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("POST /v1/shell/exec", auth(a.requireSession(a.handleShellExec)))
-	mux.HandleFunc("GET /v1/shell/jobs", auth(a.handleShellJobs))
-	mux.HandleFunc("GET /v1/shell/jobs/{id}", auth(a.handleShellJob))
-	mux.HandleFunc("POST /v1/shell/jobs/{id}/kill", auth(a.requireSession(a.handleShellJobKill)))
+	a.handle(mux, "POST /v1/shell/exec", auth(a.requireSession(a.handleShellExec)))
+	a.handle(mux, "GET /v1/shell/jobs", auth(a.handleShellJobs))
+	a.handle(mux, "GET /v1/shell/jobs/{id}", auth(a.handleShellJob))
+	a.handle(mux, "POST /v1/shell/jobs/{id}/kill", auth(a.requireSession(a.handleShellJobKill)))
 }

@@ -23,6 +23,12 @@ jobs:
           go vet ./...
       - name: Unit tests
         run: go test -race ./...
+      - name: OpenAPI spec is current
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          swag init --generalInfo main.go --dir ./cmd/dad --output ./cmd/dad/docs --parseDependency --parseInternal
+          git diff --exit-code -- cmd/dad/docs/ || (echo "OpenAPI spec is stale: run 'make swagger' and commit the result"; exit 1)
 
   image:
     runs-on: ubuntu-latest

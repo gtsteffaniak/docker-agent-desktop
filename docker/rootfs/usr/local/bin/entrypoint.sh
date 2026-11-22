@@ -1,9 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# DAD_TOKEN is required. COMPUTER_AGENT_TOKEN is its deprecated name from before the rename;
-# dad reads either.
-if [[ -z "${DAD_TOKEN:-}" && -z "${COMPUTER_AGENT_TOKEN:-}" ]]; then
+# DAD_TOKEN is required.
+if [[ -z "${DAD_TOKEN:-}" ]]; then
   echo "DAD_TOKEN must be set" >&2
   exit 1
 fi

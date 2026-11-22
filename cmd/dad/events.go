@@ -71,9 +71,28 @@ func (a *Agent) eventsSince(since uint64, limit int) []ActivityEvent {
 }
 
 func (a *Agent) registerEventRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /v1/session/events", auth(a.handleSessionEvents))
+	a.handle(mux, "GET /v1/session/events", auth(a.handleSessionEvents))
 }
 
+// sessionEventsResponse is the GET /v1/session/events body.
+type sessionEventsResponse struct {
+	Events    []ActivityEvent `json:"events"`
+	LatestSeq uint64          `json:"latest_seq"`
+}
+
+// handleSessionEvents returns activity-log events after ?since=N, up to ?limit= (default 100,
+// max 500).
+// @Summary Activity log events
+// @Description Activity-log events with sequence number greater than ?since=, up to ?limit= (default 100, max 500). Poll with the latest_seq returned to follow the log.
+// @Tags events
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param since query integer false "Only events with seq greater than this"
+// @Param limit query integer false "Maximum events to return (default 100, max 500)"
+// @Success 200 {object} sessionEventsResponse "Events and the latest sequence number"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Security ApiKeyAuth
+// @Router /v1/session/events [get]
 func (a *Agent) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -82,5 +101,5 @@ func (a *Agent) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	latest := a.events.latest
 	a.events.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"events": events, "latest_seq": latest})
+	_ = json.NewEncoder(w).Encode(sessionEventsResponse{Events: events, LatestSeq: latest})
 }

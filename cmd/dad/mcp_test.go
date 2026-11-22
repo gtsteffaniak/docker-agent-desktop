@@ -18,7 +18,8 @@ import (
 // expectedMCPTools is every tool registerMCPTools registers.
 var expectedMCPTools = []string{
 	"session_acquire", "session_keepalive", "session_release", "session_pause",
-	"session_resume", "session_get", "session_events", "health_get",
+	"session_resume", "session_get", "session_events", "session_wait",
+	"session_takeover", "health_get",
 	"shell_exec", "shell_job_get", "shell_job_kill", "shell_jobs_list",
 	"files_list", "files_read", "files_write", "files_delete", "files_mkdir",
 	"files_move",
