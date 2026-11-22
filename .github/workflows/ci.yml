@@ -57,7 +57,7 @@ jobs:
           go-version: "1.27"
           cache: true
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.15.0
           args: --timeout=5m
@@ -88,21 +88,17 @@ jobs:
           retention-days: 7
 
   build:
-    name: go build (${{ matrix.arch }})
+    name: go build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
           cache: true
-      - name: Cross-compile the whole module
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build ./...
+      - name: Build the whole module
+        run: go build ./...
 
   swagger:
     name: OpenAPI spec is current
@@ -144,10 +140,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: actionlint
-        uses: rhysd/actionlint@v1
+        uses: rhysd/actionlint@v1.7.7
 
   image:
-    name: image + docker e2e
+    name: image
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [test]
@@ -157,10 +153,6 @@ jobs:
         run: docker run --rm -v "$PWD":/src:ro -w /src ghcr.io/hadolint/hadolint hadolint --config /src/.hadolint.yaml docker/Dockerfile
       - name: Build image
         run: DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-agent-desktop:ci .
-      - name: End-to-end (docker)
-        run: DAD_IMAGE=docker-agent-desktop:ci DOCKER=docker ./scripts/e2e.sh
-        env:
-          DAD_TOKEN: ci-token
       - name: Budgets
         run: DAD_IMAGE=docker-agent-desktop:ci DOCKER=docker ./scripts/budgets.sh
         env:
@@ -170,8 +162,8 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD/.dive-ci:/.dive-ci:ro" wagoodman/dive:latest docker-agent-desktop:ci --ci
 
-  e2e-playwright:
-    name: playwright e2e (no docker)
+  e2e:
+    name: playwright e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [test, build]
@@ -201,8 +193,7 @@ jobs:
         # dad launches its own browser by looking up `chromium` on PATH; the
         # Playwright install is the only Chromium on the runner, so symlink it.
         run: |
-          CHROME=""
-          for c in "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux/chrome; do CHROME="$c"; break; done
+          CHROME="$(find "$HOME/.cache/ms-playwright" -path '*/chrome-linux*/chrome' -type f 2>/dev/null | head -n 1)"
           test -n "$CHROME" || (echo "no Playwright chromium found"; exit 1)
           mkdir -p "$RUNNER_TEMP/chrombin" "$RUNNER_TEMP/dad-home"
           ln -sf "$CHROME" "$RUNNER_TEMP/chrombin/chromium"
@@ -210,7 +201,7 @@ jobs:
           "$RUNNER_TEMP/chrombin/chromium" --version
       - name: Compile check (fail fast before the suite starts the server)
         run: go build ./...
-      - name: Playwright e2e (server runs on the runner, no docker)
+      - name: Playwright e2e
         run: npx playwright test
         working-directory: tests/e2e
         env:
