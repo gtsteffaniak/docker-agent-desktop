@@ -78,6 +78,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # wasted). The agent, module and config are later, small layers so code changes do not re-copy
 # the rootfs.
 FROM scratch AS runtime
+# hadolint ignore=DL3067
 COPY --from=rootfs / /
 
 COPY --from=agent /out/dc-agent /usr/local/bin/dc-agent
