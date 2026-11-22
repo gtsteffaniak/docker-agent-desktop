@@ -1,12 +1,13 @@
 # Image
 
-The image is built from `docker/Dockerfile`. It has four stages. Only the runtime stage ships:
+The image is built from `docker/Dockerfile`. It has five stages. Only the runtime stage ships:
 
 | Stage | What it does | Shipped |
 |-------|--------------|---------|
 | `agent` | Builds `dc-agent` with Go. Module and build caches are BuildKit cache mounts. | the binary only |
 | `module` | Builds the GTK keyboard module against the runtime's GTK. | the `.so` only |
-| `rootfs` | Debian trixie upgraded to the current archive, with the desktop apps and Chromium. | its filesystem, flattened |
+| `playwright` | `npm ci` of `playwright-core` from `docker/playwright/package-lock.json`, with browser downloads skipped. | `node_modules` only (npm is not shipped) |
+| `rootfs` | Debian trixie upgraded to the current archive, with the desktop apps, Chromium and Node.js. | its filesystem, flattened |
 | `runtime` | `FROM scratch`: the `rootfs` filesystem as one layer, then the agent, module and config. | yes |
 
 ## Base image

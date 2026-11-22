@@ -1,0 +1,4 @@
+#!/bin/sh
+# Drive and record the container's live Chromium with Playwright (connectOverCDP).
+# See /usr/local/lib/dc-playwright/dc-playwright.js and docs/playwright.md.
+exec node /usr/local/lib/dc-playwright/dc-playwright.js "$@"

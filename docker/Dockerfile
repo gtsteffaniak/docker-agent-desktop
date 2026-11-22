@@ -5,7 +5,8 @@
 # Stages (only the runtime stage is shipped):
 #   agent    Go binary for dc-agent. Module and build caches are BuildKit cache mounts.
 #   module   The GTK keyboard module (libdc-windows.so), built against the runtime's GTK.
-#   rootfs   Debian trixie with the apps and Chromium, upgraded to the current archive.
+#   playwright  playwright-core from docker/playwright/package-lock.json (npm ci, no browsers).
+#   rootfs   Debian trixie with the apps, Chromium and Node, upgraded to the current archive.
 #   runtime  FROM scratch: the rootfs copied in as one layer, then the agent and config.
 #
 # Build:    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t docker-computer:dev .
@@ -47,6 +48,21 @@ COPY cmd/dc-windows/module.c /src/module.c
 RUN cc -O2 -Wall -Wno-deprecated-declarations -shared -fPIC -o /src/libdc-windows.so \
     /src/module.c $(pkg-config --cflags --libs gtk+-3.0)
 
+# playwright-core only: the client library. Playwright's browser downloads are skipped; dc-playwright
+# attaches to the image's own Chromium over CDP. npm stays in this stage and is not shipped.
+FROM ${DEBIAN_IMAGE} AS playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates npm
+WORKDIR /opt/dc-playwright
+COPY docker/playwright/package.json docker/playwright/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && test ! -e node_modules/playwright-core/.local-browsers
+
 FROM ${DEBIAN_IMAGE} AS rootfs
 ARG WITH_SSH_CLIENT=true
 # Colour emoji font, ~10 MB. Off by default; 1 or true installs it.
@@ -63,7 +79,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     set -eux; \
     pkgs="ca-certificates curl tini dbus-x11 libgtk-3-bin hicolor-icon-theme librsvg2-common \
-          lxterminal mousepad thunar chromium fonts-liberation"; \
+          lxterminal mousepad thunar chromium fonts-liberation nodejs"; \
     if [ "$WITH_SSH_CLIENT" = "true" ]; then pkgs="$pkgs openssh-client"; fi; \
     case "$WITH_EMOJI_FONT" in 1|true) pkgs="$pkgs fonts-noto-color-emoji" ;; esac; \
     DEBIAN_FRONTEND=noninteractive apt-get update; \
@@ -72,6 +88,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log /var/cache/debconf/*-old; \
     groupadd -g 1000 bot; \
     useradd -m -u 1000 -g 1000 -s /bin/bash bot
+COPY --from=playwright /opt/dc-playwright/node_modules /usr/local/lib/dc-playwright/node_modules
 
 # The shipped image starts from scratch so the base layer and the apt layer are one layer: files the
 # upgrade replaced exist once, not twice (dive no longer reports the base's libssl/libcrypto as
@@ -83,7 +100,8 @@ COPY --from=rootfs / /
 
 COPY --from=agent /out/dc-agent /usr/local/bin/dc-agent
 COPY --from=module /src/libdc-windows.so /usr/local/lib/gtk-3.0/3.0.0/modules/libdc-windows.so
-COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=0755 docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright /usr/local/bin/
+COPY docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js /usr/local/lib/dc-playwright/dc-playwright.js
 COPY docker/rootfs/etc/dc/apps.d/ /etc/dc/apps.d/
 
 LABEL org.opencontainers.image.title="docker-computer" \
@@ -97,7 +115,10 @@ WORKDIR /home/bot
 # FROM scratch carries no ENV from the base, so PATH is set here.
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GTK_PATH=/usr/local/lib/gtk-3.0 \
-    GTK_MODULES=dc-windows
+    GTK_MODULES=dc-windows \
+    NODE_PATH=/usr/local/lib/dc-playwright/node_modules \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    DC_CDP_URL=http://127.0.0.1:9222
 
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=2s --start-period=8s --retries=6 \

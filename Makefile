@@ -16,10 +16,15 @@ help: ## Show available targets
 
 gate: lint unit build e2e budgets dive ## Run every check (lint, unit, build, e2e, budgets, dive)
 
-lint: hadolint ## gofmt, go vet, shellcheck and hadolint
+lint: hadolint ## gofmt, go vet, shellcheck, node --check and hadolint
 	@test -z "$$(gofmt -l . | grep -v '^$$')" || (echo "gofmt needed"; gofmt -l .; exit 1)
 	go vet ./...
-	@command -v shellcheck >/dev/null && shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh || true
+	@if command -v shellcheck >/dev/null; then \
+	  shellcheck scripts/*.sh docker/rootfs/usr/local/bin/entrypoint.sh docker/rootfs/usr/local/bin/dc-playwright; \
+	else echo "shellcheck not installed: skipped"; fi
+	@if command -v node >/dev/null; then \
+	  node --check docker/rootfs/usr/local/lib/dc-playwright/dc-playwright.js; \
+	else echo "node not installed: dc-playwright.js syntax check skipped"; fi
 
 hadolint: ## Lint the Dockerfile
 	$(HADOLINT) docker/Dockerfile
