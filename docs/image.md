@@ -6,7 +6,32 @@ The image is built from `docker/Dockerfile`. It has four stages. Only the runtim
 |-------|--------------|---------|
 | `agent` | Builds `dc-agent` with Go. Module and build caches are BuildKit cache mounts. | the binary only |
 | `module` | Builds the GTK keyboard module against the runtime's GTK. | the `.so` only |
-| `runtime` | Debian trixie with the desktop apps, Chromium and the agent. | yes |
+| `rootfs` | Debian trixie upgraded to the current archive, with the desktop apps and Chromium. | its filesystem, flattened |
+| `runtime` | `FROM scratch`: the `rootfs` filesystem as one layer, then the agent, module and config. | yes |
+
+## Base image
+
+`DEBIAN_IMAGE` at the top of the Dockerfile pins `debian:trixie-slim` by digest, so two builds of
+the same commit start from the same base. The `rootfs` stage runs `apt-get upgrade` before it
+installs packages, so security fixes published after the pinned base still land on every rebuild.
+
+The official `trixie-slim` tag is rebuilt on Debian's schedule, not on every security update, so it
+usually lags the archive (for example, the pinned base ships `libssl3t64` 3.5.7 while the archive
+has 3.5.9). When apt replaces a base-layer file in a later layer, both copies are stored and dive
+counts the old one as wasted. The runtime stage avoids that by starting `FROM scratch` and copying
+the upgraded `rootfs` in as a single layer: every file is stored once, and dive reports 0 bytes
+wasted. The cost is that the image no longer shares a base layer with other `debian:trixie-slim`
+images on the same host or registry.
+
+To move to a newer base:
+
+```bash
+make bump-base   # docker pull debian:trixie-slim, rewrite the ARG DEBIAN_IMAGE pin
+make gate        # rebuild and run every check
+```
+
+Commit the Dockerfile change on its own so the base bump is easy to review and revert. A plain
+rebuild without `bump-base` is still current: the upgrade step pulls the archive's latest packages.
 
 ## Build
 
