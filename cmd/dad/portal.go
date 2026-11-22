@@ -80,17 +80,20 @@ func (a *Agent) appProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := "/apps/" + r.PathValue("id")
 	target := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	direct := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		direct(req)
-		req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
-		if req.URL.Path == "" {
-			req.URL.Path = "/"
-		}
-		req.Host = target.Host
-		// Ask for an uncompressed body so the HTML can get the key script below.
-		req.Header.Del("Accept-Encoding")
+	// Built directly with Rewrite (not NewSingleHostReverseProxy): Director is
+	// deprecated since Go 1.26, and even clearing it trips staticcheck. SetURL
+	// reproduces the default director (scheme/host from the target).
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.Out.URL.Path = strings.TrimPrefix(r.Out.URL.Path, prefix)
+			if r.Out.URL.Path == "" {
+				r.Out.URL.Path = "/"
+			}
+			r.Out.Host = target.Host
+			// Ask for an uncompressed body so the HTML can get the key script below.
+			r.Out.Header.Del("Accept-Encoding")
+		},
 	}
 	proxy.ModifyResponse = injectKeysScript
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {

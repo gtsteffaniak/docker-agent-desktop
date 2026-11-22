@@ -15,6 +15,7 @@ Set these as environment variables on `docker run` or in `make dev`.
 | `DAD_BROWSER_IDLE_MINUTES` | `30` | Stop Chromium after this many minutes with no command or input from a client. The next navigation starts it again. `0` disables the idle stop. |
 | `DAD_AUTOSTART_APPS` | `0` | `1` starts every GTK app at boot. Otherwise each app starts when its window opens. |
 | `DAD_IMAGE` | `docker-agent-desktop:dev` | Image the e2e and budget scripts test. |
+| `BUDGET_BOOT_SECONDS` | `3` | Ceiling for `MEASURED budget_boot_to_healthy_seconds` in `scripts/budgets.sh` (integer). Also logs `budget_boot_docker_run_seconds` and `budget_boot_healthz_wait_seconds`. |
 | `DAD_DESKTOP_DIR` | unset | Serve the desktop from this directory instead of the embedded copy. For development. |
 
 ## Apps

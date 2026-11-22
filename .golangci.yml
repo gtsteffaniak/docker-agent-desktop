@@ -1,0 +1,12 @@
+# golangci-lint v2 config. Deliberately small: only linters that are cheap,
+# stable and clean on this tree today. Grow the list in later PRs rather than
+# landing a red gate.
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - ineffassign
+    - misspell

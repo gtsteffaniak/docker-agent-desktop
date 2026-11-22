@@ -103,7 +103,8 @@ func TestCSSIsCanonicalAndContainsNoRawInput(t *testing.T) {
 
 func TestImageCachesLastSize(t *testing.T) {
 	s, _ := Parse(Default)
-	if s.Image(10, 10) != s.Image(10, 10) {
+	first := s.Image(10, 10)
+	if first != s.Image(10, 10) {
 		t.Fatal("same size should return the cached image")
 	}
 	if s.Image(10, 10) == s.Image(12, 10) {

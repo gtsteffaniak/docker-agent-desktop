@@ -33,7 +33,7 @@ Every window is drawn by the web desktop. A GTK app renders into its own `broadw
 | `internal/cdp` | DevTools client for the Chromium screencast (started on the first viewer, stopped after the last), on-demand screenshots, navigation state, history and input. |
 | `dad-playwright` (`docker/rootfs/usr/local/lib/dad-playwright`) | Node CLI on `playwright-core`. Attaches to the running Chromium over CDP to drive it, record actions and a trace into `~/recordings`, and replay recordings (see [playwright.md](playwright.md)). |
 | `dad-apt` (`docker/rootfs/usr/local/bin/dad-apt`) | Rootless package tier: unpacks Debian packages under `/home/bot` and runs them under PRoot (see [image.md](image.md#installing-software-without-root-dad-apt)). |
-| `docker/rootfs/usr/local/bin/entrypoint.sh` | Starts the first broadwayd (terminal's display), then execs `dad`. |
+| `docker/rootfs/usr/local/bin/entrypoint.sh` | Starts the first broadwayd (terminal's display) in the background, launches a D-Bus session, then execs `dad` (does not wait on broadwayd; dad reconnects). |
 | `tini` | PID 1. Reaps children and forwards signals to the process group. |
 
 ## Notes

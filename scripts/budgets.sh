@@ -4,6 +4,11 @@
 #
 # Units: image size is reported in bytes, MB (10^6) and MiB (2^20). Memory is the container's cgroup
 # usage from docker stats, in MiB; the memory budgets are MiB.
+#
+# Boot timing until GET /healthz on the published port (MEASURED budget_boot_*_seconds):
+#   budget_boot_docker_run_seconds   — `docker run -d` (create container + start entrypoint/tini)
+#   budget_boot_healthz_wait_seconds — poll until /healthz (entrypoint + dad listen; poll sleeps 50ms)
+#   budget_boot_to_healthy_seconds   — sum of the two; compared to BUDGET_BOOT_SECONDS (integer, default 3)
 set -euo pipefail
 
 IMAGE="${DAD_IMAGE:-docker-agent-desktop:dev}"
@@ -13,9 +18,13 @@ DOCKER="${DOCKER:-docker}"
 
 idle_budget_mib=60
 browser_budget_mib=400
-boot_budget_s=3
+boot_budget_s="${BUDGET_BOOT_SECONDS:-3}"
+if ! [[ "$boot_budget_s" =~ ^[0-9]+$ ]]; then
+  echo "BUDGET_BOOT_SECONDS must be an integer: $boot_budget_s" >&2
+  exit 2
+fi
 
-# shellcheck disable=SC2317 # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329 # invoked by the EXIT trap
 cleanup() { $DOCKER rm -f "$NAME" "${NAME}-browser" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -54,15 +63,22 @@ image_bytes=$($DOCKER image inspect "$IMAGE" --format='{{.Size}}')
 echo "MEASURED image_size_bytes=$image_bytes image_size_MB=$((image_bytes / 1000000)) image_size_MiB=$((image_bytes / 1048576)) (uncompressed)"
 
 # Boot-to-healthy, idle (no browser, no apps).
-start=$(now_ms)
+start_total=$(now_ms)
 $DOCKER run -d --name "$NAME" -p 127.0.0.1::8080 \
   -e DAD_TOKEN="$TOKEN" \
   -e DAD_BROWSER_START=off \
   -e DAD_AUTOSTART_APPS=0 \
   "$IMAGE" >/dev/null
+run_done=$(now_ms)
 port=$(wait_healthy "$NAME") || { echo "FAIL container never became healthy"; exit 1; }
-boot_s=$(python3 -I -c "print(f'{($(now_ms) - $start) / 1000:.3f}')")
-echo "MEASURED boot_to_healthy_s=$boot_s"
+healthy_done=$(now_ms)
+read -r budget_boot_to_healthy_s budget_boot_docker_run_s budget_boot_healthz_wait_s <<<"$(python3 -I -c "
+t0, t1, t2 = $start_total, $run_done, $healthy_done
+print(f'{(t2 - t0) / 1000:.3f} {(t1 - t0) / 1000:.3f} {(t2 - t1) / 1000:.3f}')
+")"
+echo "MEASURED budget_boot_docker_run_seconds=$budget_boot_docker_run_s"
+echo "MEASURED budget_boot_healthz_wait_seconds=$budget_boot_healthz_wait_s"
+echo "MEASURED budget_boot_to_healthy_seconds=$budget_boot_to_healthy_s"
 
 sleep 3
 idle_mib=$(mem_mib "$NAME")
@@ -106,7 +122,7 @@ fi
 if (( browser_mib > browser_budget_mib )); then
   echo "FAIL browser ${browser_mib}MiB > ${browser_budget_mib}MiB"; fail=1
 fi
-if python3 -I -c "import sys; sys.exit(0 if float('$boot_s') <= $boot_budget_s else 1)"; then :; else
-  echo "FAIL boot ${boot_s}s > ${boot_budget_s}s"; fail=1
+if python3 -I -c "import sys; sys.exit(0 if float('$budget_boot_to_healthy_s') <= $boot_budget_s else 1)"; then :; else
+  echo "FAIL budget_boot_to_healthy ${budget_boot_to_healthy_s}s > BUDGET_BOOT_SECONDS=${boot_budget_s}s"; fail=1
 fi
 exit $fail
