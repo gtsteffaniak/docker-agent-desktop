@@ -21,30 +21,19 @@ export NO_AT_BRIDGE=1
 
 mkdir -p "${HOME}/.cache" "${HOME}/.config/dad/apps.d" "${HOME}/.local/share" "${HOME}/recordings" "${HOME}/.dad" "${HOME}/.dad/logs"
 
-# One session bus for every app. GTK apps (thunar, mousepad) need it for settings, and without
-# it they print "Cannot autolaunch D-Bus without X11 $DISPLAY" on every start.
-if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
-  eval "$(dbus-launch --sh-syntax)"
-  export DBUS_SESSION_BUS_ADDRESS
-fi
-
 # Loopback only: Broadway has no authentication; dad proxies it behind the token check.
 # The subshell makes broadwayd an orphan of tini (PID 1) instead of a child of this shell, which
 # becomes dad on exec below. dad never waits on a child it did not start, so a
 # broadwayd that exits under it would stay a zombie; tini reaps it instead.
+# Do not block boot on broadwayd answering: dad's Broadway client reconnects with backoff.
 ( broadwayd "${BROADWAY_DISPLAY}" -a 127.0.0.1 -p "${BROADWAY_PORT}" & )
 
-ready=0
-for _ in $(seq 1 100); do
-  if curl -sf "http://127.0.0.1:${BROADWAY_PORT}/" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  sleep 0.05
-done
-if [[ "${ready}" != 1 ]]; then
-  echo "entrypoint: broadwayd did not answer on port ${BROADWAY_PORT}" >&2
-  exit 1
+# One session bus for every app. GTK apps (thunar, mousepad) need it for settings, and without
+# it they print "Cannot autolaunch D-Bus without X11 $DISPLAY" on every start.
+# Start broadwayd first so dbus-launch can overlap with it warming up.
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+  eval "$(dbus-launch --sh-syntax)"
+  export DBUS_SESSION_BUS_ADDRESS
 fi
 
 # The web desktop (served by dad) draws every window, so the dock and browser window are not

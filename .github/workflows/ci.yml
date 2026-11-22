@@ -18,7 +18,7 @@ jobs:
   format:
     name: gofmt
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -32,7 +32,7 @@ jobs:
   vet:
     name: go vet + go.mod tidy
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -49,7 +49,7 @@ jobs:
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -65,7 +65,7 @@ jobs:
   test:
     name: go test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -86,7 +86,7 @@ jobs:
   build:
     name: go build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -115,7 +115,7 @@ jobs:
   scripts-lint:
     name: shellcheck + node check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -132,7 +132,7 @@ jobs:
   workflows-lint:
     name: actionlint
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
       - name: actionlint
@@ -141,7 +141,7 @@ jobs:
   image:
     name: image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     needs: [build]
     steps:
       - uses: actions/checkout@v4
@@ -161,7 +161,7 @@ jobs:
   e2e:
     name: playwright e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     needs: [build]
     env:
       DAD_TOKEN: e2e-playwright-token
