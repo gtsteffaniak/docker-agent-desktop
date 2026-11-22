@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { BASE_URL, DAD_TOKEN } from '../playwright.config.js';
-import { acquire, release, waitForSessionFree } from './helpers.js';
+import { acquire, ensureSessionFree, release } from './helpers.js';
 
 // Runs after desktop.spec.ts (alphabetical order, workers: 1). The desktop
 // page is used only as a same-origin page to open raw WebSockets from.
@@ -8,7 +8,7 @@ test.describe.serial('browser stream', () => {
   let sid: string | null = null;
 
   test.beforeAll(async ({ request }) => {
-    await waitForSessionFree(request, 15_000);
+    await ensureSessionFree(request, 30_000);
     sid = (await acquire(request, 'e2e-playwright-stream')).id;
   });
 

@@ -43,6 +43,19 @@ export async function release(request: APIRequestContext, sid: string): Promise<
   return api(request, 'POST', '/v1/session/release', { body: { session_id: sid } });
 }
 
+/** Release the live session via the agent token (any holder, including the desktop page). */
+export async function releaseLiveSession(request: APIRequestContext): Promise<void> {
+  const cur = await api(request, 'GET', '/v1/session');
+  const id = cur.json?.session?.id as string | undefined;
+  if (id) await release(request, id).catch(() => {});
+}
+
+/** Drop any live session, then poll until the lease is free. */
+export async function ensureSessionFree(request: APIRequestContext, timeoutMs = 15_000): Promise<void> {
+  await releaseLiveSession(request);
+  await waitForSessionFree(request, timeoutMs);
+}
+
 /** Poll until no session is held (or throw). The desktop and API specs hand the lease over. */
 export async function waitForSessionFree(request: APIRequestContext, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

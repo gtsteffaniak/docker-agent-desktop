@@ -49,13 +49,13 @@ See [image.md](image.md) for the stages, build arguments, the runtime user, root
 | `format` | `gofmt -l` must be empty |
 | `vet` | `go vet ./...`, and `go.mod`/`go.sum` must be tidy |
 | `lint` | golangci-lint v2.15.0 (see `.golangci.yml`: staticcheck, ineffassign, misspell) |
-| `test` | `go test -race` with coverage, on Go 1.27 and `stable` |
+| `test` | `go test -race` with coverage (Go 1.27) |
 | `build` | `go build ./...` |
 | `swagger` | `make swagger` must produce no diff in `cmd/dad/docs/` |
 | `scripts-lint` | shellcheck over `scripts/*.sh` and the rootfs wrappers, `node --check` on `dad-playwright.js` |
 | `workflows-lint` | actionlint over the workflow files |
-| `image` | hadolint, docker build, `scripts/budgets.sh`, dive gate (runs after `test`) |
-| `e2e` | Playwright suite in `tests/e2e` against the server on the runner (runs after `test` and `build`) |
+| `image` | hadolint, docker build, `scripts/budgets.sh`, dive gate (runs after `build`) |
+| `e2e` | Playwright suite in `tests/e2e` against the server on the runner (runs after `build`) |
 
 ## Dependencies
 

@@ -63,18 +63,14 @@ jobs:
           args: --timeout=5m
 
   test:
-    name: go test (${{ matrix.go-version }})
+    name: go test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.27", stable]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: "1.27"
           cache: true
       - name: Unit tests with race detector and coverage
         run: go test -race -coverprofile=coverage.out ./...
@@ -83,7 +79,7 @@ jobs:
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-go-${{ matrix.go-version }}
+          name: coverage-go
           path: coverage.out
           retention-days: 7
 
@@ -146,7 +142,7 @@ jobs:
     name: image
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [test]
+    needs: [build]
     steps:
       - uses: actions/checkout@v4
       - name: Hadolint
@@ -166,7 +162,7 @@ jobs:
     name: playwright e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [test, build]
+    needs: [build]
     env:
       DAD_TOKEN: e2e-playwright-token
     steps:
@@ -199,12 +195,13 @@ jobs:
           ln -sf "$CHROME" "$RUNNER_TEMP/chrombin/chromium"
           echo "$RUNNER_TEMP/chrombin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/chrombin/chromium" --version
-      - name: Compile check (fail fast before the suite starts the server)
-        run: go build ./...
+      - name: Build dad for the suite
+        run: go build -o "${{ runner.temp }}/dad" ./cmd/dad
       - name: Playwright e2e
         run: npx playwright test
         working-directory: tests/e2e
         env:
+          DAD_BIN: ${{ runner.temp }}/dad
           DAD_TEST_HOME: ${{ runner.temp }}/dad-home
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

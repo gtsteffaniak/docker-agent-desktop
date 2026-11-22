@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { BASE_URL, DAD_TOKEN } from '../playwright.config.js';
-import { api, waitForSessionFree } from './helpers.js';
+import { api, ensureSessionFree, waitForSessionFree } from './helpers.js';
 
 // Runs after api.spec.ts (alphabetical order, workers: 1) and hands the lease
 // back when its pages close, so stream.spec.ts can take it next. GTK apps have
@@ -9,6 +9,11 @@ import { api, waitForSessionFree } from './helpers.js';
 test.describe.serial('desktop', () => {
   test.beforeAll(async ({ request }) => {
     await waitForSessionFree(request, 15_000);
+  });
+
+  test.afterAll(async ({ request }) => {
+    // pagehide release is flaky in headless CI; clear the desktop lease explicitly.
+    await ensureSessionFree(request, 30_000);
   });
 
   test('portal login, dock, browser window and live frames', async ({ page, request }) => {

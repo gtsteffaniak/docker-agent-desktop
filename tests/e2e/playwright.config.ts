@@ -31,7 +31,8 @@ export default defineConfig({
   },
 
   webServer: {
-    command: 'go run ./cmd/dad',
+    // CI builds the binary first so Playwright does not re-download modules on every run.
+    command: process.env.DAD_BIN ?? 'go run ./cmd/dad',
     cwd: '../..',
     url: `${BASE_URL}/healthz`,
     timeout: 120_000,
