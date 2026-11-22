@@ -1,7 +1,8 @@
-// The stable /v1 API. The old /api/* routes stay exactly as they are (the web
-// desktop uses them); /v1 is the surface agents drive, with a session contract
-// (see session.go) and real health (see health.go). /v1 mirrors /api behaviour
-// where an endpoint already exists and adds the new ones.
+// The stable /v1 API: the only agent surface. There is no unversioned
+// /api/* surface anymore — it was removed in the initial release, together
+// with the pre-rename auth names, rather than deprecated. The web desktop
+// drives /v1 too. /healthz stays a bare 200 (container liveness) and POST
+// /mcp stays unversioned (MCP carries its own protocol versioning).
 package main
 
 import (

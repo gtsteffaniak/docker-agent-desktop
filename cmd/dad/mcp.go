@@ -23,9 +23,44 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// mcpJSONRPCRequest is a JSON-RPC 2.0 request to POST /mcp.
+type mcpJSONRPCRequest struct {
+	JSONRPC string `json:"jsonrpc" example:"2.0"`
+	Method  string `json:"method" example:"tools/call"`
+	Params  any    `json:"params,omitempty"`
+	ID      any    `json:"id,omitempty"`
+}
+
+// mcpJSONRPCError is the error member of a JSON-RPC 2.0 response.
+type mcpJSONRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// mcpJSONRPCResponse is a JSON-RPC 2.0 response from POST /mcp.
+type mcpJSONRPCResponse struct {
+	JSONRPC string           `json:"jsonrpc" example:"2.0"`
+	Result  any              `json:"result,omitempty"`
+	Error   *mcpJSONRPCError `json:"error,omitempty"`
+	ID      any              `json:"id,omitempty"`
+}
+
 // registerMCP mounts the MCP Streamable HTTP handler at POST /mcp, behind
 // auth. GET /mcp (and any other method) is a 405: the mux only registers the
 // POST pattern, and the SDK handler itself also rejects non-POST requests.
+// @Summary MCP endpoint
+// @Description The Model Context Protocol surface, served as Streamable HTTP (JSON-RPC 2.0, stateless). Every tool calls the same Agent service methods the /v1 HTTP handlers call — never an HTTP round-trip to self. Mutating tools enforce the session rule in-process (live session required, id must match, session must not be paused); reads never require a session. See docs/mcp.md for the tool list.
+// @Tags mcp
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param body body mcpJSONRPCRequest true "JSON-RPC 2.0 request (initialize, tools/list, tools/call, …)"
+// @Success 200 {object} mcpJSONRPCResponse "JSON-RPC 2.0 response"
+// @Failure 400 {string} string "Not a JSON-RPC request, or a non-POST method"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 405 {string} string "Only POST is served"
+// @Security ApiKeyAuth
+// @Router /mcp [post]
 func (a *Agent) registerMCP(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "docker-agent-desktop", Version: "1"}, nil)
 	a.registerMCPTools(server)
@@ -33,7 +68,7 @@ func (a *Agent) registerMCP(mux *http.ServeMux, auth func(http.HandlerFunc) http
 		func(*http.Request) *mcp.Server { return server },
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
 	)
-	mux.HandleFunc("POST /mcp", auth(handler.ServeHTTP))
+	a.handle(mux, "POST /mcp", auth(handler.ServeHTTP))
 }
 
 // mcpSession enforces the session rule for mutating tools, with the same
@@ -100,6 +135,8 @@ func (a *Agent) registerMCPTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "session_resume", Description: "Resume a paused live session."}, a.mcpSessionResume)
 	mcp.AddTool(server, &mcp.Tool{Name: "session_get", Description: "Report the live session (or null) plus browser, viewer and app state."}, a.mcpSessionGet)
 	mcp.AddTool(server, &mcp.Tool{Name: "session_events", Description: "Read the activity log: events with seq greater than since, up to limit."}, a.mcpSessionEvents)
+	mcp.AddTool(server, &mcp.Tool{Name: "session_wait", Description: "Wait until the session lease is free, or the timeout elapses. Does not acquire."}, a.mcpSessionWait)
+	mcp.AddTool(server, &mcp.Tool{Name: "session_takeover", Description: "Force-acquire the session lease, evicting whoever holds it. Requires force true; the evicted holder is recorded in the activity log."}, a.mcpSessionTakeover)
 	// Health.
 	mcp.AddTool(server, &mcp.Tool{Name: "health_get", Description: "Real session health: agent, chromium, broadway, disk and session checks."}, a.mcpHealthGet)
 	// Shell.
@@ -145,6 +182,18 @@ func (a *Agent) registerMCPTools(server *mcp.Server) {
 // --- argument structs ---
 // session_id is required on every mutating tool. Reads accept an optional
 // session_id too, ignored, so a client can pass it uniformly to every tool.
+
+type sessionWaitIn struct {
+	TimeoutMs int `json:"timeout_ms,omitempty" jsonschema:"how long to wait in milliseconds, default 30000, clamped to 1000..300000"`
+}
+
+type sessionTakeoverIn struct {
+	Kind  string `json:"kind" jsonschema:"agent or user"`
+	Name  string `json:"name" jsonschema:"name of the session holder"`
+	RunID string `json:"run_id,omitempty" jsonschema:"run id, for agent holders"`
+	TTLMs int    `json:"ttl_ms,omitempty" jsonschema:"lease TTL in milliseconds, clamped to 10s..10min; default 90s"`
+	Force bool   `json:"force" jsonschema:"must be true: evicting another holder is deliberate, never accidental"`
+}
 
 type sessionAcquireIn struct {
 	Kind  string `json:"kind" jsonschema:"agent or user"`
@@ -371,6 +420,40 @@ func (a *Agent) mcpSessionEvents(ctx context.Context, _ *mcp.CallToolRequest, in
 	latest := a.events.latest
 	a.events.mu.Unlock()
 	return nil, map[string]any{"events": events, "latest_seq": latest}, nil
+}
+
+func (a *Agent) mcpSessionWait(ctx context.Context, _ *mcp.CallToolRequest, in sessionWaitIn) (*mcp.CallToolResult, any, error) {
+	start := time.Now()
+	free := a.waitFree(ctx, clampWaitTimeout(in.TimeoutMs))
+	s := a.sessionState()
+	sc := a.screencast()
+	viewers := 0
+	if sc != nil {
+		viewers = sc.Viewers()
+	}
+	return nil, sessionWaitResponse{
+		Free:           free,
+		Session:        s,
+		BrowserRunning: sc != nil,
+		Viewers:        viewers,
+		AppsRunning:    a.runningAppIDs(),
+		UptimeS:        int64(time.Since(a.startedAt).Seconds()),
+		WaitedMs:       time.Since(start).Milliseconds(),
+	}, nil
+}
+
+func (a *Agent) mcpSessionTakeover(ctx context.Context, _ *mcp.CallToolRequest, in sessionTakeoverIn) (*mcp.CallToolResult, any, error) {
+	if !in.Force {
+		return nil, nil, errors.New("takeover requires force=true")
+	}
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	if in.Kind != "agent" && in.Kind != "user" {
+		return nil, nil, errors.New("kind must be agent or user")
+	}
+	evicted, s := a.takeoverSession(SessionHolder{Kind: in.Kind, Name: in.Name, RunID: in.RunID}, requestedLeaseTTL(in.TTLMs))
+	return nil, sessionTakeoverResponse{Session: s, Evicted: evicted}, nil
 }
 
 // --- health ---

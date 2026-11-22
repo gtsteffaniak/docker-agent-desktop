@@ -243,14 +243,14 @@ func TestHealthBrowserStoppedIsNotDegraded(t *testing.T) {
 	a, _ := newFullAgent(t)
 	t.Setenv("DAD_BROWSER_START", "lazy")
 	h := a.sessionHealth(t.Context())
-	checks := h["checks"].(map[string]any)
-	if checks["chromium"] != "stopped" {
-		t.Fatalf("chromium = %v, want stopped", checks["chromium"])
+	checks := h.Checks
+	if checks.Chromium != "stopped" {
+		t.Fatalf("chromium = %v, want stopped", checks.Chromium)
 	}
 	a.browser = &browserRun{stop: func() {}}
 	h = a.sessionHealth(t.Context())
-	checks = h["checks"].(map[string]any)
-	if checks["chromium"] != "down" || h["status"] != "degraded" {
-		t.Fatalf("supervised without CDP: chromium = %v, status = %v; want down, degraded", checks["chromium"], h["status"])
+	checks = h.Checks
+	if checks.Chromium != "down" || h.Status != "degraded" {
+		t.Fatalf("supervised without CDP: chromium = %v, status = %v; want down, degraded", checks.Chromium, h.Status)
 	}
 }

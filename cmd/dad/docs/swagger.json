@@ -1,0 +1,3731 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "The stable /v1 API of docker-agent-desktop: shell, files, browser, display, apps, sessions, health and the activity log, plus the MCP Streamable HTTP endpoint. There is no unversioned /api surface: it was removed in the initial release, together with the pre-rename auth names, rather than deprecated.",
+        "title": "Docker Agent Desktop API",
+        "contact": {},
+        "license": {
+            "name": "Apache-2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        },
+        "version": "1"
+    },
+    "paths": {
+        "/healthz": {
+            "get": {
+                "description": "Bare 200. Container liveness only, not session health: use GET /v1/health for whether the session is actually usable.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "Container liveness",
+                "responses": {
+                    "200": {
+                        "description": "Alive"
+                    }
+                }
+            }
+        },
+        "/mcp": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The Model Context Protocol surface, served as Streamable HTTP (JSON-RPC 2.0, stateless). Every tool calls the same Agent service methods the /v1 HTTP handlers call — never an HTTP round-trip to self. Mutating tools enforce the session rule in-process (live session required, id must match, session must not be paused); reads never require a session. See docs/mcp.md for the tool list.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "MCP endpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "JSON-RPC 2.0 request (initialize, tools/list, tools/call, …)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.mcpJSONRPCRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON-RPC 2.0 response",
+                        "schema": {
+                            "$ref": "#/definitions/main.mcpJSONRPCResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Not a JSON-RPC request, or a non-POST method",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "405": {
+                        "description": "Only POST is served",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/apps": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Lists the registry apps with whether each is running. The browser (port 0) is running when its screencast is attached.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "List apps",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Registry apps",
+                        "schema": {
+                            "$ref": "#/definitions/main.appsListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/apps/start": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Starts one registry app: its Broadway display first, then the app. Starting an app that is already running does nothing. The browser (port 0) has no process to start; this reports whether Chromium is running instead.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Start an app",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Registry app id",
+                        "name": "id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "App started (or already running)",
+                        "schema": {
+                            "$ref": "#/definitions/main.appStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown app id",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "500": {
+                        "description": "App start failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/apps/stop": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Stops one registry app and reports it as not running. Unknown ids are a 400, mirroring start. The browser (port 0) has no app process, so stopping it stops Chromium. The app's broadwayd display stays running for reuse.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Stop an app",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Registry app id",
+                        "name": "id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "App stopped",
+                        "schema": {
+                            "$ref": "#/definitions/main.appStopResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown app id",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "500": {
+                        "description": "App stop failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/act": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Performs one high-level browser action: click, type, select, scroll or key. Click and scroll take a selector (resolved to its centre) or x/y coordinates; type and select take a selector plus text; key takes a key name. A selector that matches nothing is a 404.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Action to perform",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.browserActRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Action performed"
+                    },
+                    "400": {
+                        "description": "Unknown act kind, or select/key missing what they need",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Selector matched nothing",
+                        "schema": {
+                            "$ref": "#/definitions/main.actErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Action failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/back": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Goes back in the page history.",
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser back",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Went back"
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Navigation failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/evaluate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Runs one JavaScript expression in the page and returns its value as raw JSON (undefined, functions and other values with no JSON form become null). The expression is capped at 64 KiB.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Evaluate JavaScript in the page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Expression to evaluate",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.browserEvaluateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Expression value",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserEvaluateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Evaluation failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/forward": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Goes forward in the page history.",
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser forward",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Went forward"
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Navigation failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/frame": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "One frame of the page. Without ?since it takes a fresh screenshot (JPEG by default, PNG with ?format=png). With ?since=N it serves the screencast for a polling client: 204 when no frame newer than N exists. The X-Frame-Seq header carries the frame sequence number to poll with next.",
+                "produces": [
+                    "image/jpeg",
+                    "image/png"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser frame",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "enum": [
+                            "jpeg",
+                            "png"
+                        ],
+                        "type": "string",
+                        "description": "Image format",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Poll: only a frame newer than this sequence number (JPEG only)",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Frame image",
+                        "schema": {
+                            "type": "file"
+                        },
+                        "headers": {
+                            "X-Frame-Seq": {
+                                "type": "string",
+                                "description": "Sequence number of the frame"
+                            }
+                        }
+                    },
+                    "204": {
+                        "description": "No frame newer than ?since="
+                    },
+                    "400": {
+                        "description": "Unknown format, or since polling with format=png",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "504": {
+                        "description": "Screenshot timed out",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/input": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Forwards one pointer, scroll, key or paste event to the page. Which fields apply depends on type: pointer takes action/x/y/button/buttons/clicks/mods, key takes action/key/code/text/mods, scroll takes x/y/dx/dy/mods, paste takes text.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Send browser input",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "One input event",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.browserInputRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Input delivered"
+                    },
+                    "400": {
+                        "description": "Unparsable body, or unknown input type",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Input failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/navigate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Navigates the page. Navigating is what starts Chromium, so the first address starts it. The reply is the normalized URL that was navigated to.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Navigate the browser",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "URL to navigate to",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.browserNavigateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Normalized URL navigated to",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserNavigateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body, or unusable URL",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Navigation failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium could not start",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/reload": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Reloads the page.",
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Reload the browser",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Reloaded"
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Navigation failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/size": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Sets the browser viewport size (CSS pixels, with the device pixel ratio as scale).",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Set browser viewport size",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Viewport width, height and scale",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.browserSizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Viewport resized"
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "502": {
+                        "description": "Resize failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/start": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Starts Chromium on first use and reports whether it is running. Starting an already-running browser does nothing.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Start the browser",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Browser running",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserRunningResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium could not start",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/state": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The page's real URL, title and history availability. ?fmt=lines returns a plain text form (url, title, back=0|1, forward=0|1, seq=N, one per line). Chromium not running yet is running=false, not an error.",
+                "produces": [
+                    "application/json",
+                    "text/plain"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "enum": [
+                            "lines"
+                        ],
+                        "type": "string",
+                        "description": "Plain-text form",
+                        "name": "fmt",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Navigation state",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserStateOut"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/stop": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Stops Chromium. The next navigation starts it again.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Stop the browser",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Browser stopped",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserRunningResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/stream": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The live browser socket: binary JPEG frames and navigation-state messages pumped down, navigate/pointer/key/scroll/paste/size commands read in order. A WebSocket cannot carry the X-Dad-Session header, so the session travels as ?session=\u003cid\u003e at connect, or a {\"type\":\"session\",\"session_id\":\"...\"} message that (re)binds the socket mid-connection. Frames and state flow without a session (reads); every control message is refused while no live, unpaused session is bound. A ?session= naming no live session is a 409 at connect time. Control messages carrying an \"id\" get an {\"type\":\"ack\",\"id\",\"ok\",\"error\"} reply.",
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser live stream",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id to bind at connect (control messages need a live, unpaused session bound)",
+                        "name": "session",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switched to the WebSocket protocol"
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "?session= names no live session",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/browser/text": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns the page's visible text.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "browser"
+                ],
+                "summary": "Browser page text",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Visible text",
+                        "schema": {
+                            "$ref": "#/definitions/main.browserTextResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "502": {
+                        "description": "Could not read the page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Chromium not running",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/click": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Clicks at root display coordinates. Button defaults to left (1); 2 is middle, 3 is right.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Click at display coordinates",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Click coordinates and button",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.displayClickRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Clicked"
+                    },
+                    "400": {
+                        "description": "Unparsable body, or button not 1..3",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Display unavailable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/drag": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Drags with the left button from (x1, y1) to (x2, y2).",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Drag on the display",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Drag start and end coordinates",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.displayDragRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Dragged"
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Display unavailable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/key": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Presses and releases one key by name (Return, Tab, Escape, arrows, F1–F12, single characters). Mods are GDK modifier masks: Shift 1, Control 4, Alt 8.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Press a key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Key name and modifiers",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.displayKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Key pressed"
+                    },
+                    "400": {
+                        "description": "Unparsable body, or unknown key",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Display unavailable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/meta": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Raw Broadway debug JSON (display size, connection state). Free-form: the shape is Broadway's, not this API's.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Display debug state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Broadway debug state",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/screenshot": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The current display frame as a PNG. With ?wait=1 it waits up to 15 s for a fresh frame first.",
+                "produces": [
+                    "image/png"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Display screenshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "enum": [
+                            "1"
+                        ],
+                        "type": "string",
+                        "description": "Wait for a fresh frame first",
+                        "name": "wait",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PNG image",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Screenshot failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "504": {
+                        "description": "No frame within the wait",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/scroll": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Scrolls vertically at root display coordinates. dx is ignored: horizontal scrolling is not supported by the Broadway encoder.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Scroll at display coordinates",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Scroll coordinates and deltas",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.displayScrollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Scrolled"
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Display unavailable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/display/type": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Types text into the focused window.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "display"
+                ],
+                "summary": "Type text",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Text to type",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.displayTypeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Typed"
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "503": {
+                        "description": "Display unavailable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Removes a file or directory. Directories need recursive=true unless empty. The home directory itself can never be deleted. A final symlink is removed itself, never its target.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Delete a file or directory",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Home-relative path to delete",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "1",
+                            "true"
+                        ],
+                        "type": "string",
+                        "description": "Recursively delete a non-empty directory",
+                        "name": "recursive",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted path",
+                        "schema": {
+                            "$ref": "#/definitions/main.filePathResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Path missing, escapes the jail, is home itself, or a non-empty directory without recursive",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Path not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/list": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Lists one jailed directory. ?path= is home-relative (empty means home). Paths are home-relative in the reply.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "List files",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Home-relative directory (empty means home)",
+                        "name": "path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Directory listing",
+                        "schema": {
+                            "$ref": "#/definitions/main.filesListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Path escapes the home jail",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Directory not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/mkdir": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Creates a directory and its parents, jailed under home.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Make a directory",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Directory path",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.fileMkdirRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Created path",
+                        "schema": {
+                            "$ref": "#/definitions/main.filePathResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Path missing or escapes the jail",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/move": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Renames within the jail. The destination must not already exist. Deleting or moving the home directory itself is refused.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Move or rename a file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Source and destination paths",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.fileMoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Moved paths",
+                        "schema": {
+                            "$ref": "#/definitions/main.fileMoveResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "from/to missing, path escapes the jail, destination exists, or home itself",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Source not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/read": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns one file's bytes, capped at 10 MiB. ?download=1 adds a Content-Disposition attachment header.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Read a file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Home-relative file path",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "1"
+                        ],
+                        "type": "string",
+                        "description": "Send as a download attachment",
+                        "name": "download",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File bytes",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Path escapes the home jail, or is a directory",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "413": {
+                        "description": "File exceeds the 10 MiB limit",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/upload": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Writes one multipart file (field \"file\") to the \"path\" form field. A trailing slash (or an existing directory) means \"into this directory\". The whole body is bounded, so an oversized upload cannot fill the disk with multipart temp files.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Upload a file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "File to upload",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Home-relative destination path (or directory)",
+                        "name": "path",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Written path and byte count",
+                        "schema": {
+                            "$ref": "#/definitions/main.fileWriteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing file/path fields, or path escapes the jail",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "413": {
+                        "description": "File exceeds the 10 MiB limit",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/write": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Writes data, creating parent directories as needed. Content over 10 MiB is refused, so everything written can be read back. Encoding \"text\" (default) writes the content as-is; \"base64\" decodes it first.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Write a file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Path, content and encoding",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.fileWriteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Written path and byte count",
+                        "schema": {
+                            "$ref": "#/definitions/main.fileWriteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Path missing, path escapes the jail, or bad encoding/base64",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "413": {
+                        "description": "Content exceeds the 10 MiB limit",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/health": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The real health check: whether the session is actually usable. Probes Chromium, Broadway, disk space and the session lease, and reports each piece, so a caller can tell a dead browser from a dead display from a full disk instead of getting one opaque 503. A transition into degraded is recorded once in the activity log.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Session health",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Health, ok or degraded",
+                        "schema": {
+                            "$ref": "#/definitions/main.healthResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/meta": {
+            "get": {
+                "description": "Unauthenticated. Returns the API version (\"1\").",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "API version",
+                "responses": {
+                    "200": {
+                        "description": "API version",
+                        "schema": {
+                            "$ref": "#/definitions/main.apiVersionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The live session (or null) plus browser state, viewer count, running apps and uptime: what a waiting caller needs to decide whether to wait.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Current session state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current state",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionGetResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/acquire": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Acquires the single session lease. Exactly one holder at a time: a second acquire is a 409 naming the current holder. The lease TTL defaults to 90 s (DAD_SESSION_LEASE_MS, clamped to 10 s..10 min); keep it alive with POST /v1/session/keepalive.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Acquire the session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Holder and optional lease TTL",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionAcquireRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Lease acquired",
+                        "schema": {
+                            "$ref": "#/definitions/main.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "holder.name missing or holder.kind not agent/user",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "Session already held",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/events": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Activity-log events with sequence number greater than ?since=, up to ?limit= (default 100, max 500). Poll with the latest_seq returned to follow the log.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "Activity log events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only events with seq greater than this",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum events to return (default 100, max 500)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Events and the latest sequence number",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionEventsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/keepalive": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Extends the lease on a live session. A keepalive for an expired, released or taken-over session is a 409: re-acquire instead.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Keep the session alive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Session id",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lease extended",
+                        "schema": {
+                            "$ref": "#/definitions/main.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No such session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/pause": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Pauses or resumes the live session. While paused, control messages are refused but the lease is still held. A pause/resume for a session that is not the live one is a 409.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Pause or resume the session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Session id",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session paused or resumed",
+                        "schema": {
+                            "$ref": "#/definitions/main.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No such session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/release": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Releases a live session. Releasing a session that is not held is a 404.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Release the session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Session id",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Released",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionReleaseResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "No such session",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/resume": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Pauses or resumes the live session. While paused, control messages are refused but the lease is still held. A pause/resume for a session that is not the live one is a 409.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Pause or resume the session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Session id",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session paused or resumed",
+                        "schema": {
+                            "$ref": "#/definitions/main.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No such session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/takeover": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Force-acquires the lease, evicting whoever holds it. Requires explicit \"force\": true — evicting another holder is deliberate, never accidental. The evicted holder is named in the activity log and in the response, so a takeover is always visible after the fact.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Take over the session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "New holder, with force=true",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionTakeoverRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "New session and the evicted one (or null)",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionTakeoverResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "force is not true, or holder.name missing / holder.kind not agent/user",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/session/wait": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Long-polls until the lease is free or the timeout elapses (default 30 s, clamped to 1 s..5 min). It never acquires: it only reports. A caller that sees free=true still has to acquire — another contender can take the lease between the wait returning and the acquire landing. A read, so no session is needed to call it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Wait for the session to free up",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Optional wait timeout",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionWaitRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Wait result",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionWaitResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Unparsable body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/shell/exec": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Runs one command. Exactly one of command (/bin/sh -c) or argv (direct exec) must be set. Synchronously unless background=true, in which case it starts the process and returns immediately with status \"running\" and a job id to poll. Non-zero exits are results with status \"failed\", not errors. Output is capped at 1 MiB per stream.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shell"
+                ],
+                "summary": "Run a shell command",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Command to run",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.ShellExecRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Execution result (or a running job)",
+                        "schema": {
+                            "$ref": "#/definitions/main.ShellExecResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Neither or both of command/argv set",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many running shell jobs",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/shell/jobs": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "All tracked jobs, oldest first. A running job reports the output captured so far and its elapsed time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shell"
+                ],
+                "summary": "List shell jobs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tracked jobs",
+                        "schema": {
+                            "$ref": "#/definitions/main.shellJobsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/shell/jobs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "One job's current result. A running job reports the output captured so far and its elapsed time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shell"
+                ],
+                "summary": "Get a shell job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Job id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Job result",
+                        "schema": {
+                            "$ref": "#/definitions/main.ShellExecResult"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown job",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/shell/jobs/{id}/kill": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "SIGKILLs a running job's whole process group (children included). Waits briefly for the waiter to finalize the result, so the response reflects the kill.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shell"
+                ],
+                "summary": "Kill a shell job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent token (or the dad_token cookie)",
+                        "name": "X-Dad-Token",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session id of the live session",
+                        "name": "X-Dad-Session",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Job id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Finalized job result",
+                        "schema": {
+                            "$ref": "#/definitions/main.ShellExecResult"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or wrong token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown or already-finished job",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "409": {
+                        "description": "No live session, or held by someone else",
+                        "schema": {
+                            "$ref": "#/definitions/main.sessionError"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "main.ActivityEvent": {
+            "type": "object",
+            "properties": {
+                "actor": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "ts": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.FileEntry": {
+            "type": "object",
+            "properties": {
+                "mod_time": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "file | dir",
+                    "type": "string"
+                }
+            }
+        },
+        "main.Session": {
+            "type": "object",
+            "properties": {
+                "acquired_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "holder": {
+                    "$ref": "#/definitions/main.SessionHolder"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "paused": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.SessionHolder": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "description": "\"agent\" or \"user\"",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.ShellExecRequest": {
+            "type": "object",
+            "properties": {
+                "argv": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "background": {
+                    "type": "boolean"
+                },
+                "command": {
+                    "type": "string"
+                },
+                "cwd": {
+                    "type": "string"
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "timeout_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.ShellExecResult": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "exit_code": {
+                    "type": "integer"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "completed | running | killed | failed | timeout",
+                    "type": "string"
+                },
+                "stderr": {
+                    "type": "string"
+                },
+                "stdout": {
+                    "type": "string"
+                },
+                "timed_out": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.actErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.apiVersionResponse": {
+            "type": "object",
+            "properties": {
+                "api_version": {
+                    "type": "string",
+                    "example": "1"
+                }
+            }
+        },
+        "main.appStartResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "running": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.appStopResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "running": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.appV1": {
+            "type": "object",
+            "properties": {
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "running": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.appsListResponse": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.appV1"
+                    }
+                }
+            }
+        },
+        "main.browserActRequest": {
+            "type": "object",
+            "properties": {
+                "button": {
+                    "type": "integer"
+                },
+                "clicks": {
+                    "type": "integer"
+                },
+                "dx": {
+                    "type": "number"
+                },
+                "dy": {
+                    "type": "number"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "main.browserEvaluateRequest": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.browserEvaluateResponse": {
+            "type": "object",
+            "properties": {
+                "value": {}
+            }
+        },
+        "main.browserInputRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "button": {
+                    "type": "integer"
+                },
+                "buttons": {
+                    "type": "integer"
+                },
+                "clicks": {
+                    "type": "integer"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "dx": {
+                    "type": "number"
+                },
+                "dy": {
+                    "type": "number"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "mods": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "pointer | key | scroll | paste",
+                    "type": "string"
+                },
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "main.browserNavigateRequest": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.browserNavigateResponse": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.browserRunningResponse": {
+            "type": "object",
+            "properties": {
+                "running": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.browserSizeRequest": {
+            "type": "object",
+            "properties": {
+                "h": {
+                    "type": "integer"
+                },
+                "scale": {
+                    "type": "number"
+                },
+                "w": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.browserStateOut": {
+            "type": "object",
+            "properties": {
+                "can_back": {
+                    "type": "boolean"
+                },
+                "can_forward": {
+                    "type": "boolean"
+                },
+                "running": {
+                    "type": "boolean"
+                },
+                "seq": {
+                    "description": "Seq increases whenever any other field changes, so callers can detect updates cheaply.",
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.browserTextResponse": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.displayClickRequest": {
+            "type": "object",
+            "properties": {
+                "button": {
+                    "type": "integer"
+                },
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.displayDragRequest": {
+            "type": "object",
+            "properties": {
+                "x1": {
+                    "type": "integer"
+                },
+                "x2": {
+                    "type": "integer"
+                },
+                "y1": {
+                    "type": "integer"
+                },
+                "y2": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.displayKeyRequest": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "mods": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.displayScrollRequest": {
+            "type": "object",
+            "properties": {
+                "dx": {
+                    "type": "integer"
+                },
+                "dy": {
+                    "type": "integer"
+                },
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.displayTypeRequest": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.fileMkdirRequest": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.fileMoveRequest": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.fileMoveResponse": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.filePathResponse": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.fileWriteRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "encoding": {
+                    "description": "text (default) | base64",
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.fileWriteResponse": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.filesListResponse": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.FileEntry"
+                    }
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.healthChecks": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string"
+                },
+                "broadway": {
+                    "type": "string"
+                },
+                "chromium": {
+                    "type": "string"
+                },
+                "disk": {
+                    "type": "string"
+                },
+                "disk_free_bytes": {
+                    "type": "integer"
+                },
+                "session": {
+                    "$ref": "#/definitions/main.healthSessionCheck"
+                }
+            }
+        },
+        "main.healthResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "$ref": "#/definitions/main.healthChecks"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uptime_s": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.healthSessionCheck": {
+            "type": "object",
+            "properties": {
+                "expires_in_s": {
+                    "type": "integer"
+                },
+                "held": {
+                    "type": "boolean"
+                },
+                "holder": {
+                    "$ref": "#/definitions/main.SessionHolder"
+                },
+                "paused": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.mcpJSONRPCError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.mcpJSONRPCRequest": {
+            "type": "object",
+            "properties": {
+                "id": {},
+                "jsonrpc": {
+                    "type": "string",
+                    "example": "2.0"
+                },
+                "method": {
+                    "type": "string",
+                    "example": "tools/call"
+                },
+                "params": {}
+            }
+        },
+        "main.mcpJSONRPCResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/main.mcpJSONRPCError"
+                },
+                "id": {},
+                "jsonrpc": {
+                    "type": "string",
+                    "example": "2.0"
+                },
+                "result": {}
+            }
+        },
+        "main.sessionAcquireRequest": {
+            "type": "object",
+            "properties": {
+                "holder": {
+                    "$ref": "#/definitions/main.SessionHolder"
+                },
+                "ttl_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.sessionError": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "holder": {
+                    "$ref": "#/definitions/main.SessionHolder"
+                },
+                "paused": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.sessionEventsResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.ActivityEvent"
+                    }
+                },
+                "latest_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.sessionGetResponse": {
+            "type": "object",
+            "properties": {
+                "apps_running": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "browser_running": {
+                    "type": "boolean"
+                },
+                "session": {
+                    "$ref": "#/definitions/main.Session"
+                },
+                "uptime_s": {
+                    "type": "integer"
+                },
+                "viewers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.sessionIDRequest": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.sessionReleaseResponse": {
+            "type": "object",
+            "properties": {
+                "released": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "main.sessionTakeoverRequest": {
+            "type": "object",
+            "properties": {
+                "force": {
+                    "type": "boolean"
+                },
+                "holder": {
+                    "$ref": "#/definitions/main.SessionHolder"
+                },
+                "ttl_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.sessionTakeoverResponse": {
+            "type": "object",
+            "properties": {
+                "evicted": {
+                    "$ref": "#/definitions/main.Session"
+                },
+                "session": {
+                    "$ref": "#/definitions/main.Session"
+                }
+            }
+        },
+        "main.sessionWaitRequest": {
+            "type": "object",
+            "properties": {
+                "timeout_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.sessionWaitResponse": {
+            "type": "object",
+            "properties": {
+                "apps_running": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "browser_running": {
+                    "type": "boolean"
+                },
+                "free": {
+                    "type": "boolean"
+                },
+                "session": {
+                    "$ref": "#/definitions/main.Session"
+                },
+                "uptime_s": {
+                    "type": "integer"
+                },
+                "viewers": {
+                    "type": "integer"
+                },
+                "waited_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.shellJobsResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.ShellExecResult"
+                    }
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "Agent token, set from DAD_TOKEN. The dad_token portal cookie is accepted as an alternative.",
+            "type": "apiKey",
+            "name": "X-Dad-Token",
+            "in": "header"
+        }
+    }
+}

@@ -257,6 +257,53 @@ func writeFileErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// filesListResponse is the GET /v1/files/list body.
+type filesListResponse struct {
+	Path    string      `json:"path"`
+	Entries []FileEntry `json:"entries"`
+}
+
+// fileWriteResponse is the POST /v1/files/write and /v1/files/upload body.
+type fileWriteResponse struct {
+	Path string `json:"path"`
+	Size int    `json:"size"`
+}
+
+// filePathResponse is the POST /v1/files/mkdir and DELETE /v1/files body.
+type filePathResponse struct {
+	Path string `json:"path"`
+}
+
+// fileMoveResponse is the POST /v1/files/move body.
+type fileMoveResponse struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// fileMkdirRequest is the body of POST /v1/files/mkdir.
+type fileMkdirRequest struct {
+	Path string `json:"path"`
+}
+
+// fileMoveRequest is the body of POST /v1/files/move.
+type fileMoveRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// handleFilesList lists one jailed directory. ?path= is home-relative (empty means home).
+// @Summary List files
+// @Description Lists one jailed directory. ?path= is home-relative (empty means home). Paths are home-relative in the reply.
+// @Tags files
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param path query string false "Home-relative directory (empty means home)"
+// @Success 200 {object} filesListResponse "Directory listing"
+// @Failure 400 {string} string "Path escapes the home jail"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "Directory not found"
+// @Security ApiKeyAuth
+// @Router /v1/files/list [get]
 func (a *Agent) handleFilesList(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	entries, err := a.listFiles(path)
@@ -267,9 +314,25 @@ func (a *Agent) handleFilesList(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []FileEntry{}
 	}
-	writeJSON(w, map[string]any{"path": path, "entries": entries})
+	writeJSON(w, filesListResponse{Path: path, Entries: entries})
 }
 
+// handleFilesRead returns one file's bytes, capped at 10 MiB. ?download=1 adds a
+// Content-Disposition attachment header.
+// @Summary Read a file
+// @Description Returns one file's bytes, capped at 10 MiB. ?download=1 adds a Content-Disposition attachment header.
+// @Tags files
+// @Produce octet-stream
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param path query string true "Home-relative file path"
+// @Param download query string false "Send as a download attachment" Enums(1)
+// @Success 200 {file} string "File bytes"
+// @Failure 400 {string} string "Path escapes the home jail, or is a directory"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "File not found"
+// @Failure 413 {string} string "File exceeds the 10 MiB limit"
+// @Security ApiKeyAuth
+// @Router /v1/files/read [get]
 func (a *Agent) handleFilesRead(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	data, err := a.readFile(path)
@@ -294,6 +357,23 @@ type fileWriteRequest struct {
 	Encoding string `json:"encoding"` // text (default) | base64
 }
 
+// handleFilesWrite writes data, creating parent directories as needed. It refuses content over
+// 10 MiB, so everything written can be read back.
+// @Summary Write a file
+// @Description Writes data, creating parent directories as needed. Content over 10 MiB is refused, so everything written can be read back. Encoding "text" (default) writes the content as-is; "base64" decodes it first.
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body fileWriteRequest true "Path, content and encoding"
+// @Success 200 {object} fileWriteResponse "Written path and byte count"
+// @Failure 400 {string} string "Path missing, path escapes the jail, or bad encoding/base64"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 413 {string} string "Content exceeds the 10 MiB limit"
+// @Security ApiKeyAuth
+// @Router /v1/files/write [post]
 func (a *Agent) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 	var req fileWriteRequest
 	if !decodeJSON(w, r, 16<<20, &req) {
@@ -324,9 +404,27 @@ func (a *Agent) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recordEvent("files.write", a.sessionHolderName(r), req.Path)
 	abs, _ := a.jailPath(req.Path)
-	writeJSON(w, map[string]any{"path": a.relHome(abs), "size": len(data)})
+	writeJSON(w, fileWriteResponse{Path: a.relHome(abs), Size: len(data)})
 }
 
+// handleFilesUpload writes one multipart file. The whole body is bounded, not just the file
+// part, so an oversized upload cannot fill the disk with multipart temp files.
+// @Summary Upload a file
+// @Description Writes one multipart file (field "file") to the "path" form field. A trailing slash (or an existing directory) means "into this directory". The whole body is bounded, so an oversized upload cannot fill the disk with multipart temp files.
+// @Tags files
+// @Accept multipart/form-data
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param file formData file true "File to upload"
+// @Param path formData string true "Home-relative destination path (or directory)"
+// @Success 200 {object} fileWriteResponse "Written path and byte count"
+// @Failure 400 {string} string "Missing file/path fields, or path escapes the jail"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 413 {string} string "File exceeds the 10 MiB limit"
+// @Security ApiKeyAuth
+// @Router /v1/files/upload [post]
 func (a *Agent) handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 	// Bound the whole body, not just the file part, so an oversized upload
 	// cannot fill the disk with multipart temp files.
@@ -374,13 +472,26 @@ func (a *Agent) handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recordEvent("files.write", a.sessionHolderName(r), dest)
 	abs, _ := a.jailPath(dest)
-	writeJSON(w, map[string]any{"path": a.relHome(abs), "size": len(data)})
+	writeJSON(w, fileWriteResponse{Path: a.relHome(abs), Size: len(data)})
 }
 
+// handleFilesMkdir creates a directory and its parents.
+// @Summary Make a directory
+// @Description Creates a directory and its parents, jailed under home.
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body fileMkdirRequest true "Directory path"
+// @Success 200 {object} filePathResponse "Created path"
+// @Failure 400 {string} string "Path missing or escapes the jail"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Security ApiKeyAuth
+// @Router /v1/files/mkdir [post]
 func (a *Agent) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Path string `json:"path"`
-	}
+	var req fileMkdirRequest
 	if !decodeJSON(w, r, 64<<10, &req) {
 		return
 	}
@@ -394,14 +505,27 @@ func (a *Agent) handleFilesMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recordEvent("files.mkdir", a.sessionHolderName(r), req.Path)
 	abs, _ := a.jailPath(req.Path)
-	writeJSON(w, map[string]any{"path": a.relHome(abs)})
+	writeJSON(w, filePathResponse{Path: a.relHome(abs)})
 }
 
+// handleFilesMove renames within the jail. The destination must not already exist.
+// @Summary Move or rename a file
+// @Description Renames within the jail. The destination must not already exist. Deleting or moving the home directory itself is refused.
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body fileMoveRequest true "Source and destination paths"
+// @Success 200 {object} fileMoveResponse "Moved paths"
+// @Failure 400 {string} string "from/to missing, path escapes the jail, destination exists, or home itself"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "Source not found"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Security ApiKeyAuth
+// @Router /v1/files/move [post]
 func (a *Agent) handleFilesMove(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		From string `json:"from"`
-		To   string `json:"to"`
-	}
+	var req fileMoveRequest
 	if !decodeJSON(w, r, 64<<10, &req) {
 		return
 	}
@@ -416,9 +540,26 @@ func (a *Agent) handleFilesMove(w http.ResponseWriter, r *http.Request) {
 	a.recordEvent("files.move", a.sessionHolderName(r), req.From+" -> "+req.To)
 	fromAbs, _ := a.jailPathNoFollow(req.From)
 	toAbs, _ := a.jailPathNoFollow(req.To)
-	writeJSON(w, map[string]any{"from": a.relHome(fromAbs), "to": a.relHome(toAbs)})
+	writeJSON(w, fileMoveResponse{From: a.relHome(fromAbs), To: a.relHome(toAbs)})
 }
 
+// handleFilesDelete removes a file or directory. Directories need recursive=true unless
+// empty. The home directory itself can never be deleted.
+// @Summary Delete a file or directory
+// @Description Removes a file or directory. Directories need recursive=true unless empty. The home directory itself can never be deleted. A final symlink is removed itself, never its target.
+// @Tags files
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param path query string true "Home-relative path to delete"
+// @Param recursive query string false "Recursively delete a non-empty directory" Enums(1, true)
+// @Success 200 {object} filePathResponse "Deleted path"
+// @Failure 400 {string} string "Path missing, escapes the jail, is home itself, or a non-empty directory without recursive"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {string} string "Path not found"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Security ApiKeyAuth
+// @Router /v1/files [delete]
 func (a *Agent) handleFilesDelete(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -431,17 +572,17 @@ func (a *Agent) handleFilesDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.recordEvent("files.delete", a.sessionHolderName(r), path)
-	writeJSON(w, map[string]any{"path": path})
+	writeJSON(w, filePathResponse{Path: path})
 }
 
 // registerFileRoutes mounts the file endpoints. Mutating routes are
 // session-gated (auth first, then requireSession).
 func (a *Agent) registerFileRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /v1/files/list", auth(a.handleFilesList))
-	mux.HandleFunc("GET /v1/files/read", auth(a.handleFilesRead))
-	mux.HandleFunc("POST /v1/files/write", auth(a.requireSession(a.handleFilesWrite)))
-	mux.HandleFunc("POST /v1/files/upload", auth(a.requireSession(a.handleFilesUpload)))
-	mux.HandleFunc("POST /v1/files/mkdir", auth(a.requireSession(a.handleFilesMkdir)))
-	mux.HandleFunc("POST /v1/files/move", auth(a.requireSession(a.handleFilesMove)))
-	mux.HandleFunc("DELETE /v1/files", auth(a.requireSession(a.handleFilesDelete)))
+	a.handle(mux, "GET /v1/files/list", auth(a.handleFilesList))
+	a.handle(mux, "GET /v1/files/read", auth(a.handleFilesRead))
+	a.handle(mux, "POST /v1/files/write", auth(a.requireSession(a.handleFilesWrite)))
+	a.handle(mux, "POST /v1/files/upload", auth(a.requireSession(a.handleFilesUpload)))
+	a.handle(mux, "POST /v1/files/mkdir", auth(a.requireSession(a.handleFilesMkdir)))
+	a.handle(mux, "POST /v1/files/move", auth(a.requireSession(a.handleFilesMove)))
+	a.handle(mux, "DELETE /v1/files", auth(a.requireSession(a.handleFilesDelete)))
 }

@@ -14,50 +14,112 @@ import (
 )
 
 // registerBrowserV1Routes mounts the /v1 browser surface. Reads are open to any authed caller;
-// the mutating routes are session-gated. The state/navigate/input/size/back/forward/reload
-// routes are thin aliases of the existing /api/browser/* handlers.
+// the mutating routes are session-gated. The browser stream (GET
+// /v1/browser/stream) is the live frame + command socket; its control
+// messages are session-gated through the session bound to the socket (see
+// browser_ws.go).
 func (a *Agent) registerBrowserV1Routes(mux *http.ServeMux, auth func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("POST /v1/browser/start", auth(a.requireSession(a.handleBrowserStart)))
-	mux.HandleFunc("POST /v1/browser/stop", auth(a.requireSession(a.handleBrowserStop)))
-	mux.HandleFunc("POST /v1/browser/evaluate", auth(a.requireSession(a.handleBrowserEvaluate)))
-	mux.HandleFunc("POST /v1/browser/act", auth(a.requireSession(a.handleBrowserAct)))
-	mux.HandleFunc("GET /v1/browser/text", auth(a.handleBrowserText))
-	mux.HandleFunc("GET /v1/browser/state", auth(a.handleBrowserState))
-	mux.HandleFunc("POST /v1/browser/navigate", auth(a.requireSession(a.handleV1BrowserNavigate)))
-	mux.HandleFunc("POST /v1/browser/back", auth(a.requireSession(a.browserAction((*cdp.Screencast).GoBack))))
-	mux.HandleFunc("POST /v1/browser/forward", auth(a.requireSession(a.browserAction((*cdp.Screencast).GoForward))))
-	mux.HandleFunc("POST /v1/browser/reload", auth(a.requireSession(a.browserAction((*cdp.Screencast).Reload))))
-	mux.HandleFunc("POST /v1/browser/input", auth(a.requireSession(a.handleBrowserInput)))
-	mux.HandleFunc("POST /v1/browser/size", auth(a.requireSession(a.handleBrowserSize)))
+	a.handle(mux, "POST /v1/browser/start", auth(a.requireSession(a.handleBrowserStart)))
+	a.handle(mux, "POST /v1/browser/stop", auth(a.requireSession(a.handleBrowserStop)))
+	a.handle(mux, "POST /v1/browser/evaluate", auth(a.requireSession(a.handleBrowserEvaluate)))
+	a.handle(mux, "POST /v1/browser/act", auth(a.requireSession(a.handleBrowserAct)))
+	a.handle(mux, "GET /v1/browser/text", auth(a.handleBrowserText))
+	a.handle(mux, "GET /v1/browser/state", auth(a.handleBrowserState))
+	a.handle(mux, "POST /v1/browser/navigate", auth(a.requireSession(a.handleV1BrowserNavigate)))
+	a.handle(mux, "POST /v1/browser/back", auth(a.requireSession(a.handleBrowserBack)))
+	a.handle(mux, "POST /v1/browser/forward", auth(a.requireSession(a.handleBrowserForward)))
+	a.handle(mux, "POST /v1/browser/reload", auth(a.requireSession(a.handleBrowserReload)))
+	a.handle(mux, "POST /v1/browser/input", auth(a.requireSession(a.handleBrowserInput)))
+	a.handle(mux, "POST /v1/browser/size", auth(a.requireSession(a.handleBrowserSize)))
+	a.handle(mux, "GET /v1/browser/frame", auth(a.handleBrowserFrame))
+	a.handle(mux, "GET /v1/browser/stream", auth(a.handleBrowserStream))
+}
+
+// browserRunningResponse is the reply to POST /v1/browser/start and /v1/browser/stop.
+type browserRunningResponse struct {
+	Running bool `json:"running"`
+}
+
+// browserEvaluateRequest is the body of POST /v1/browser/evaluate.
+type browserEvaluateRequest struct {
+	Expression string `json:"expression"`
+}
+
+// browserEvaluateResponse is the reply to POST /v1/browser/evaluate: the expression's
+// value as raw JSON.
+type browserEvaluateResponse struct {
+	Value any `json:"value"`
+}
+
+// browserTextResponse is the reply to GET /v1/browser/text.
+type browserTextResponse struct {
+	Text string `json:"text"`
 }
 
 // handleBrowserStart starts Chromium on first use and reports whether it is running.
+// @Summary Start the browser
+// @Description Starts Chromium on first use and reports whether it is running. Starting an already-running browser does nothing.
+// @Tags browser
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Success 200 {object} browserRunningResponse "Browser running"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 503 {string} string "Chromium could not start"
+// @Security ApiKeyAuth
+// @Router /v1/browser/start [post]
 func (a *Agent) handleBrowserStart(w http.ResponseWriter, r *http.Request) {
 	if _, err := a.ensureBrowser(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	a.recordEvent("browser.start", a.sessionHolderName(r), "")
-	writeJSON(w, map[string]any{"running": true})
+	writeJSON(w, browserRunningResponse{Running: true})
 }
 
 // handleBrowserStop stops Chromium. The next navigation starts it again.
+// @Summary Stop the browser
+// @Description Stops Chromium. The next navigation starts it again.
+// @Tags browser
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Success 200 {object} browserRunningResponse "Browser stopped"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Security ApiKeyAuth
+// @Router /v1/browser/stop [post]
 func (a *Agent) handleBrowserStop(w http.ResponseWriter, r *http.Request) {
 	a.stopBrowser()
 	a.recordEvent("browser.stop", a.sessionHolderName(r), "")
-	writeJSON(w, map[string]any{"running": false})
+	writeJSON(w, browserRunningResponse{Running: false})
 }
 
 // handleBrowserEvaluate runs one JavaScript expression in the page and returns its value as
 // raw JSON. The expression is capped at 64 KiB by the request body limit.
+// @Summary Evaluate JavaScript in the page
+// @Description Runs one JavaScript expression in the page and returns its value as raw JSON (undefined, functions and other values with no JSON form become null). The expression is capped at 64 KiB.
+// @Tags browser
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserEvaluateRequest true "Expression to evaluate"
+// @Success 200 {object} browserEvaluateResponse "Expression value"
+// @Failure 400 {string} string "Unparsable body"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Evaluation failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/evaluate [post]
 func (a *Agent) handleBrowserEvaluate(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
 		return
 	}
-	var body struct {
-		Expression string `json:"expression"`
-	}
+	var body browserEvaluateRequest
 	if !decodeJSON(w, r, 64<<10, &body) {
 		return
 	}
@@ -73,7 +135,7 @@ func (a *Agent) handleBrowserEvaluate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]any{"value": val})
+	writeJSON(w, browserEvaluateResponse{Value: val})
 }
 
 // remoteValue unwraps a CDP RemoteObject (Runtime.evaluate with returnByValue)
@@ -94,6 +156,17 @@ func remoteValue(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 // handleBrowserText returns the page's visible text.
+// @Summary Browser page text
+// @Description Returns the page's visible text.
+// @Tags browser
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Success 200 {object} browserTextResponse "Visible text"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 502 {string} string "Could not read the page"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/text [get]
 func (a *Agent) handleBrowserText(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
@@ -106,12 +179,28 @@ func (a *Agent) handleBrowserText(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]string{"text": text})
+	writeJSON(w, browserTextResponse{Text: text})
 }
 
-// handleV1BrowserNavigate delegates to the /api handler and records a browser.navigate event
-// on success. The body is read first so the URL can be recorded, then restored for the inner
-// handler.
+// handleV1BrowserNavigate delegates to the shared navigate handler and records a
+// browser.navigate event on success. The body is read first so the URL can be recorded,
+// then restored for the inner handler.
+// @Summary Navigate the browser
+// @Description Navigates the page. Navigating is what starts Chromium, so the first address starts it. The reply is the normalized URL that was navigated to.
+// @Tags browser
+// @Accept json
+// @Produce json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserNavigateRequest true "URL to navigate to"
+// @Success 200 {object} browserNavigateResponse "Normalized URL navigated to"
+// @Failure 400 {string} string "Unparsable body, or unusable URL"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Navigation failed"
+// @Failure 503 {string} string "Chromium could not start"
+// @Security ApiKeyAuth
+// @Router /v1/browser/navigate [post]
 func (a *Agent) handleV1BrowserNavigate(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
 	var body struct {
@@ -143,8 +232,29 @@ type browserActRequest struct {
 	Key      string  `json:"key,omitempty"`
 }
 
+// actErrorResponse is the 404 body when an act selector matches no element.
+type actErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // handleBrowserAct performs one high-level browser action: click, type, select, scroll or key.
 // A selector that matches nothing is a 404 with a JSON error body.
+// @Summary Browser action
+// @Description Performs one high-level browser action: click, type, select, scroll or key. Click and scroll take a selector (resolved to its centre) or x/y coordinates; type and select take a selector plus text; key takes a key name. A selector that matches nothing is a 404.
+// @Tags browser
+// @Accept json
+// @Param X-Dad-Token header string false "Agent token (or the dad_token cookie)"
+// @Param X-Dad-Session header string true "Session id of the live session"
+// @Param body body browserActRequest true "Action to perform"
+// @Success 204 "Action performed"
+// @Failure 400 {string} string "Unknown act kind, or select/key missing what they need"
+// @Failure 401 {string} string "Missing or wrong token"
+// @Failure 404 {object} actErrorResponse "Selector matched nothing"
+// @Failure 409 {object} sessionError "No live session, or held by someone else"
+// @Failure 502 {string} string "Action failed"
+// @Failure 503 {string} string "Chromium not running"
+// @Security ApiKeyAuth
+// @Router /v1/browser/act [post]
 func (a *Agent) handleBrowserAct(w http.ResponseWriter, r *http.Request) {
 	sc := a.current(w)
 	if sc == nil {
@@ -176,7 +286,7 @@ func (a *Agent) handleBrowserAct(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errSelectorNotFound) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "selector not found"})
+			_ = json.NewEncoder(w).Encode(actErrorResponse{Error: "selector not found"})
 			return
 		}
 		http.Error(w, err.Error(), http.StatusBadGateway)

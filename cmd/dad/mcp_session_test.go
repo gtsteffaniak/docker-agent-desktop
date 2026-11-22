@@ -82,12 +82,13 @@ func TestMCPSessionRuleEveryMutatingTool(t *testing.T) {
 var mcpReadTools = []string{
 	"health_get", "shell_job_get", "shell_jobs_list", "files_list", "files_read",
 	"browser_text", "browser_state", "browser_frame", "display_screenshot", "display_meta", "apps_list",
+	"session_wait",
 }
 
 // mcpSessionTools manage the lease itself.
 var mcpSessionTools = []string{
 	"session_acquire", "session_keepalive", "session_release", "session_pause",
-	"session_resume", "session_get", "session_events",
+	"session_resume", "session_get", "session_events", "session_takeover",
 }
 
 // Read tools work for anyone while another holder has the session.

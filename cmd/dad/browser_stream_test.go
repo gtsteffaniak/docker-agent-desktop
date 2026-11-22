@@ -109,7 +109,7 @@ func TestBrowserWSMovesSubscriptionOnRestart(t *testing.T) {
 	_, sc2 := connectFake(t)
 	a := &Agent{log: slog.New(slog.DiscardHandler)}
 	a.cdp = sc1
-	srv := httptest.NewServer(http.HandlerFunc(a.handleBrowserWS))
+	srv := httptest.NewServer(http.HandlerFunc(a.handleBrowserStream))
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -171,7 +171,7 @@ func TestBrowserFrameCaptureFormats(t *testing.T) {
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
-		a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/api/browser/frame"+c.query, nil))
+		a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/v1/browser/frame"+c.query, nil))
 		if rec.Code != c.code {
 			t.Fatalf("%s: code %d", c.query, rec.Code)
 		}
@@ -191,12 +191,12 @@ func TestBrowserFramePolling(t *testing.T) {
 	a := &Agent{log: slog.New(slog.DiscardHandler)}
 	a.cdp = sc
 	rec := httptest.NewRecorder()
-	a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/api/browser/frame?since=0", nil))
+	a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/v1/browser/frame?since=0", nil))
 	if rec.Code != 200 || rec.Body.String() != "frame" || rec.Header().Get("X-Frame-Seq") != "1" {
 		t.Fatalf("first poll: %d %q seq %s", rec.Code, rec.Body.String(), rec.Header().Get("X-Frame-Seq"))
 	}
 	rec = httptest.NewRecorder()
-	a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/api/browser/frame?since=1", nil))
+	a.handleBrowserFrame(rec, httptest.NewRequest(http.MethodGet, "/v1/browser/frame?since=1", nil))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("repeat poll: %d", rec.Code)
 	}

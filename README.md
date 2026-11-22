@@ -2,7 +2,7 @@
 
 A containerized desktop environment designed for agentic workflows. Native GTK apps and a Chromium browser that agents drive, record and replay with Playwright. A small Go agent, `dad` (short for docker-agent-desktop), exposes an HTTP API for apps, input, screenshots and browser frames. Viewable from a lightweight browser.
 
-[Documentation](docs/) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Desktop](docs/desktop.md) · [Image](docs/image.md) · [Playwright](docs/playwright.md) · [Portal](docs/portal.md) · [Development](docs/development.md)
+[Documentation](docs/) · [API](docs/api.md) · [Configuration](docs/configuration.md) · [Desktop](docs/desktop.md) · [Image](docs/image.md) · [Playwright](docs/playwright.md) · [Portal](docs/portal.md) · [Sessions](docs/sessions.md) · [MCP](docs/mcp.md) · [Development](docs/development.md)
 
 ## Features
 
@@ -51,6 +51,8 @@ The container refuses to start without `DAD_TOKEN`.
 | [Playwright](docs/playwright.md) | Driving, recording and replaying the live browser |
 | [Image](docs/image.md) | Stages, build arguments, base image, installing software |
 | [Portal](docs/portal.md) | Browser access, cookies, limits |
+| [Sessions](docs/sessions.md) | The single-session lease, wait/takeover, desktop session |
+| [MCP](docs/mcp.md) | MCP tools, session rule, frame/stream notes |
 | [Development](docs/development.md) | Make targets, tests, CI, cross-arch builds |
 | [Architecture](docs/architecture.md) | Components and data flow |
 | [Roadmap](docs/roadmap.md) | Planned work and known gaps |
