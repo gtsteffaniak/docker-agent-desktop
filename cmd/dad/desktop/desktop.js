@@ -18,6 +18,18 @@ const FALLBACK_APPS = [
   { id: "editor", name: "Text Editor", icon: "org.xfce.mousepad", order: 20, port: 8083 },
 ];
 
+// Framed under quantum-bots at /computers/{userId}/desktop/, dad APIs must use the same
+// public prefix so the reverse proxy can reach the container. Standalone /desktop/ uses "".
+function publicPrefix() {
+  const m = location.pathname.match(/^(\/computers\/[^/]+)/);
+  return m ? m[1] : "";
+}
+
+function publicURL(path) {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${publicPrefix()}${p}`;
+}
+
 const screenEl = document.getElementById("screen");
 const dockEl = document.getElementById("dock");
 
@@ -46,7 +58,7 @@ async function acquireDesktopSession() {
   if (!sessionPromise) {
     sessionPromise = (async () => {
       try {
-        const res = await fetch("/v1/session/acquire", {
+        const res = await fetch(publicURL("/v1/session/acquire"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ holder: { kind: "user", name: "desktop" }, ttl_ms: 300000 }),
@@ -74,7 +86,7 @@ async function acquireDesktopSession() {
 async function keepaliveDesktopSession() {
   if (!desktopSession) return;
   try {
-    const res = await fetch("/v1/session/keepalive", {
+    const res = await fetch(publicURL("/v1/session/keepalive"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: desktopSession }),
@@ -90,7 +102,7 @@ function releaseDesktopSession() {
   if (!desktopSession) return;
   const id = desktopSession;
   desktopSession = null;
-  fetch("/v1/session/release", {
+  fetch(publicURL("/v1/session/release"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: id }),
@@ -330,9 +342,9 @@ function ensureWindow(id) {
     // open — but the app may not be running behind it; reopening the window retries.
     acquireDesktopSession().then((sid) => {
       const headers = sid ? { "X-Dad-Session": sid } : {};
-      fetch(`/v1/apps/start?id=${encodeURIComponent(app.id)}`, { method: "POST", headers, cache: "no-store" })
+      fetch(publicURL(`/v1/apps/start?id=${encodeURIComponent(app.id)}`), { method: "POST", headers, cache: "no-store" })
         .catch(() => {})
-        .finally(() => { frame.src = `/apps/${encodeURIComponent(app.id)}/`; });
+        .finally(() => { frame.src = publicURL(`/apps/${encodeURIComponent(app.id)}/`); });
     });
   }
 
@@ -646,7 +658,7 @@ function mountBrowser(content, windowEl) {
     if (!run.alive) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const query = sid ? `?session=${encodeURIComponent(sid)}` : "";
-    const s = new WebSocket(`${proto}//${location.host}/v1/browser/stream${query}`);
+    const s = new WebSocket(`${proto}//${location.host}${publicURL("/v1/browser/stream")}${query}`);
     s.binaryType = "blob";
     s.onmessage = async (ev) => {
       if (typeof ev.data !== "string") {
@@ -830,7 +842,7 @@ function mountBrowser(content, windowEl) {
 
 async function loadApps() {
   try {
-    const res = await fetch("/v1/apps", { cache: "no-store" });
+    const res = await fetch(publicURL("/v1/apps"), { cache: "no-store" });
     if (res.ok) {
       const body = await res.json();
       if (Array.isArray(body.apps) && body.apps.length) return body.apps;
